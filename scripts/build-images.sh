@@ -8,7 +8,8 @@ require docker git
 GIT_COMMIT="$(git -C "${ROOT_DIR}" rev-parse HEAD)"
 TAG="${TAG:-$(git -C "${ROOT_DIR}" rev-parse --short=7 HEAD)}"
 # An image built from uncommitted changes must never look like a real commit.
-if [[ -z "${ALLOW_DIRTY:-}" ]] && [[ -n "$(git -C "${ROOT_DIR}" status --porcelain -- server client)" ]]; then
+# node_modules is ignored: it is excluded from the Docker build context.
+if [[ -z "${ALLOW_DIRTY:-}" ]] && [[ -n "$(git -C "${ROOT_DIR}" status --porcelain -- server client ':!server/node_modules' ':!client/node_modules')" ]]; then
   TAG="${TAG}-dirty"
 fi
 BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
