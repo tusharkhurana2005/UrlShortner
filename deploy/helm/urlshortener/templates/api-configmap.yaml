@@ -1,0 +1,20 @@
+{{- $fullname := include "urlshortener.fullname" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-api
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+data:
+  NODE_ENV: production
+  PORT: {{ .Values.api.port | quote }}
+  LOG_LEVEL: {{ .Values.api.logLevel | quote }}
+  CORS_ORIGINS: {{ .Values.api.corsOrigins | quote }}
+  JWT_EXPIRES_IN: {{ .Values.api.jwtExpiresIn | quote }}
+  AUTH_RATE_LIMIT: {{ .Values.api.authRateLimit | quote }}
+  DEPLOY_ENV: {{ .Release.Namespace | quote }}
+  {{- if .Values.tracing.enabled }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.tracing.otlpEndpoint | quote }}
+  OTEL_SERVICE_NAME: urlshortener-api
+  {{- end }}

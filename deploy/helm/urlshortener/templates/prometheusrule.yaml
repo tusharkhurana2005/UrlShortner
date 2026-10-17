@@ -1,0 +1,127 @@
+{{- if .Values.monitoring.prometheusRule.enabled }}
+{{- $fullname := include "urlshortener.fullname" . -}}
+{{- $sel := printf "namespace=\"%s\", service=\"%s-api\"" .Release.Namespace $fullname -}}
+{{- $edge := printf "exported_service=~\"%s-%s-api-.*\"" .Release.Namespace $fullname -}}
+{{- $errorBudget := subf 1.0 .Values.monitoring.slo.availabilityTarget | printf "%.4f" -}}
+{{- $runbook := .Values.monitoring.runbookBaseUrl -}}
+# SLOs (30-day window), measured at the ingress (Traefik) = what users see:
+#   availability: {{ mulf .Values.monitoring.slo.availabilityTarget 100 }}% of API requests do not return 5xx
+#   latency:      p95 under {{ .Values.monitoring.slo.latencyThresholdSeconds }}s
+# Measuring at the edge matters: when every API pod is NotReady the API's own
+# metrics see no traffic at all, but Traefik records the 503s users get.
+# 4xx are client errors and do not consume the error budget. The API's own
+# histogram (per route) is kept for diagnosis.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: urlshortener.sli
+      interval: 30s
+      rules:
+        {{- range $w := list "5m" "30m" "1h" "6h" }}
+        - record: urlshortener:request_rate:rate{{ $w }}
+          expr: sum(rate(traefik_service_requests_total{ {{ $edge }} }[{{ $w }}]))
+        - record: urlshortener:error_ratio:rate{{ $w }}
+          expr: |
+            sum(rate(traefik_service_requests_total{ {{ $edge }}, code=~"5.." }[{{ $w }}]))
+            /
+            sum(rate(traefik_service_requests_total{ {{ $edge }} }[{{ $w }}]))
+        {{- end }}
+        - record: urlshortener:latency_p95:rate5m
+          expr: histogram_quantile(0.95, sum by (le) (rate(traefik_service_request_duration_seconds_bucket{ {{ $edge }} }[5m])))
+        - record: urlshortener:latency_p95:rate10m
+          expr: histogram_quantile(0.95, sum by (le) (rate(traefik_service_request_duration_seconds_bucket{ {{ $edge }} }[10m])))
+        # API-side view (excludes probes and /metrics), used to find which route is failing.
+        - record: urlshortener:api_error_ratio_by_route:rate5m
+          expr: |
+            sum by (route) (rate(http_request_duration_seconds_count{ {{ $sel }}, status_code=~"5.." }[5m]))
+            /
+            sum by (route) (rate(http_request_duration_seconds_count{ {{ $sel }} }[5m]))
+
+    - name: urlshortener.alerts
+      rules:
+        # Multi-window burn-rate alerts (Google SRE workbook). Fast burn = the
+        # whole 30-day budget would be gone in ~2 days: page someone.
+        - alert: UrlShortenerErrorBudgetFastBurn
+          expr: |
+            urlshortener:error_ratio:rate1h > (14.4 * {{ $errorBudget }})
+            and
+            urlshortener:error_ratio:rate5m > (14.4 * {{ $errorBudget }})
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: API is burning its error budget 14x too fast
+            description: "{{`{{ $value | humanizePercentage }}`}} of API requests at the ingress are failing with 5xx."
+            runbook_url: {{ $runbook }}#error-budget-burn
+        - alert: UrlShortenerErrorBudgetSlowBurn
+          expr: |
+            urlshortener:error_ratio:rate6h > (6 * {{ $errorBudget }})
+            and
+            urlshortener:error_ratio:rate30m > (6 * {{ $errorBudget }})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: API error rate is steadily eating the error budget
+            description: "{{`{{ $value | humanizePercentage }}`}} of API requests failed over the last 6h."
+            runbook_url: {{ $runbook }}#error-budget-burn
+        - alert: UrlShortenerHighLatency
+          expr: urlshortener:latency_p95:rate10m > {{ .Values.monitoring.slo.latencyThresholdSeconds }}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: API p95 latency above {{ .Values.monitoring.slo.latencyThresholdSeconds }}s
+            description: "p95 latency is {{`{{ $value | humanizeDuration }}`}}."
+            runbook_url: {{ $runbook }}#high-latency
+        - alert: UrlShortenerApiDown
+          expr: sum(up{ {{ $sel }} }) == 0 or absent(up{ {{ $sel }} })
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: No API pod is being scraped successfully
+            description: Prometheus cannot reach any API pod; users cannot log in, shorten or follow links.
+            runbook_url: {{ $runbook }}#api-down
+        - alert: UrlShortenerMongoUnavailable
+          expr: max(urlshortener_mongo_up{ {{ $sel }} }) == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: API pods have no MongoDB connection
+            description: Every API pod reports MongoDB as unreachable; API pods are NotReady and requests fail at the ingress.
+            runbook_url: {{ $runbook }}#mongodb-unavailable
+        - alert: UrlShortenerPodRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="{{ .Release.Namespace }}", pod=~"{{ $fullname }}-.*"}[15m]) > 2
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{`{{ $labels.pod }}`}} restarted more than twice in 15 minutes"
+            description: Container {{`{{ $labels.container }}`}} is restarting (crash loop, OOM kill or failing liveness probe).
+            runbook_url: {{ $runbook }}#pod-restarting
+        - alert: UrlShortenerMultipleVersionsServing
+          expr: count(count by (version) (urlshortener_build_info{ {{ $sel }} })) > 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: More than one API version has been serving for 15 minutes
+            description: A rollout is stuck or something was changed outside the pipeline (drift).
+            runbook_url: {{ $runbook }}#multiple-versions-serving
+        {{- if .Values.mongodb.backup.enabled }}
+        - alert: UrlShortenerBackupStale
+          expr: time() - max(kube_cronjob_status_last_successful_time{namespace="{{ .Release.Namespace }}", cronjob="{{ $fullname }}-mongodb-backup"}) > 93600
+          labels:
+            severity: warning
+          annotations:
+            summary: No successful MongoDB backup in the last 26 hours
+            description: The nightly backup CronJob has not succeeded; data written since the last backup is unprotected.
+            runbook_url: {{ $runbook }}#backup-stale
+        {{- end }}
+{{- end }}

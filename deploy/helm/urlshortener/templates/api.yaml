@@ -1,0 +1,191 @@
+{{- $fullname := include "urlshortener.fullname" . -}}
+{{- $sel := dict "root" . "component" "api" -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullname }}-api
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+# The API never talks to the Kubernetes API, so it gets no token at all.
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-api
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  {{- if not .Values.api.autoscaling.enabled }}
+  replicas: {{ .Values.api.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "urlshortener.selectorLabels" $sel | nindent 6 }}
+  # Rolling update that never drops below the desired count: a new pod must
+  # pass readiness before an old one is removed. A bad version never takes
+  # traffic and the rollout stalls instead of causing an outage.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "urlshortener.selectorLabels" $sel | nindent 8 }}
+        app.kubernetes.io/version: {{ include "urlshortener.version" . | quote }}
+      annotations:
+        # Changing the ConfigMap changes this hash, which rolls the pods.
+        checksum/config: {{ include (print $.Template.BasePath "/api-configmap.yaml") . | sha256sum | trunc 16 }}
+    spec:
+      serviceAccountName: {{ $fullname }}-api
+      automountServiceAccountToken: false
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.api.terminationGracePeriodSeconds }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      # Spread replicas across nodes so losing one node does not take the API down.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "urlshortener.selectorLabels" $sel | nindent 14 }}
+      containers:
+        - name: api
+          image: {{ include "urlshortener.image" (dict "root" . "repository" .Values.api.repository) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ $fullname }}-api
+          env:
+            - name: MONGO_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mongodb.existingSecret }}
+                  key: app-username
+            - name: MONGO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mongodb.existingSecret }}
+                  key: app-password
+            # $(VAR) expansion: the URI is built from the two secret values above.
+            - name: MONGODB_URI
+              value: "mongodb://$(MONGO_USER):$(MONGO_PASSWORD)@{{ include "urlshortener.mongodbHost" . }}:27017/Urls?authSource=Urls"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.apiSecret }}
+                  key: jwt-secret
+          # startup: allow up to 60s to boot before liveness can kill it.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          # liveness: process is wedged -> restart. Does not depend on Mongo.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          # readiness: Mongo reachable and not draining -> receives traffic.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+          lifecycle:
+            # Give endpoints/ingress time to stop routing here before the
+            # process starts closing connections.
+            preStop:
+              sleep:
+                seconds: 5
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext:
+            {{- include "urlshortener.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-api
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "urlshortener.selectorLabels" $sel | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.api.port }}
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $fullname }}-api
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  minAvailable: {{ .Values.api.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "urlshortener.selectorLabels" $sel | nindent 6 }}
+{{- if .Values.api.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $fullname }}-api
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $fullname }}-api
+  minReplicas: {{ .Values.api.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.api.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.api.autoscaling.targetCPUUtilizationPercentage }}
+  behavior:
+    # Scale up fast, scale down slowly to avoid flapping.
+    scaleDown:
+      stabilizationWindowSeconds: 120
+{{- end }}

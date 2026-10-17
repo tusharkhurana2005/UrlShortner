@@ -1,0 +1,5 @@
+# KSV-0109 "ConfigMap stores secrets": false positive. The MongoDB init script
+# (templates/mongodb.yaml) contains the key name `pwd`, but its values are read
+# from environment variables injected from the urlshortener-mongo Secret. No
+# secret value is stored in the ConfigMap.
+KSV-0109

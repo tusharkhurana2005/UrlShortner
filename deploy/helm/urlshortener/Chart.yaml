@@ -1,0 +1,8 @@
+apiVersion: v2
+name: urlshortener
+description: URL shortener (React web + Express API + MongoDB) with probes, autoscaling, network policies and monitoring
+type: application
+version: 1.0.0
+# Overridden at deploy time with the git SHA of the images being deployed.
+appVersion: "dev"
+kubeVersion: ">=1.30.0-0"

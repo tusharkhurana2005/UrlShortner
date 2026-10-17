@@ -1,0 +1,238 @@
+{{- $fullname := include "urlshortener.fullname" . -}}
+{{- $sel := dict "root" . "component" "mongodb" -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullname }}-mongodb
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mongodb
+automountServiceAccountToken: false
+---
+# Runs once, on first start with an empty volume. Creates least-privilege users:
+# the API gets readWrite on its own database only, the exporter gets read-only
+# monitoring roles. The root account is never given to any client.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-mongodb-init
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mongodb
+data:
+  01-create-users.js: |
+    db.getSiblingDB("Urls").createUser({
+      user: process.env.MONGO_APP_USERNAME,
+      pwd: process.env.MONGO_APP_PASSWORD,
+      roles: [{ role: "readWrite", db: "Urls" }],
+    });
+    db.getSiblingDB("admin").createUser({
+      user: process.env.MONGO_EXPORTER_USERNAME,
+      pwd: process.env.MONGO_EXPORTER_PASSWORD,
+      roles: [{ role: "clusterMonitor", db: "admin" }, { role: "read", db: "local" }],
+    });
+---
+# Headless service: gives the pod a stable DNS name
+# (<release>-mongodb-0.<release>-mongodb.<ns>.svc).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-mongodb
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mongodb
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: false
+  selector:
+    {{- include "urlshortener.selectorLabels" $sel | nindent 4 }}
+  ports:
+    - name: mongodb
+      port: 27017
+      targetPort: mongodb
+    {{- if .Values.mongodb.exporter.enabled }}
+    - name: metrics
+      port: 9216
+      targetPort: metrics
+    {{- end }}
+---
+# StatefulSet (not Deployment) because the database needs a stable identity and
+# its own persistent volume that follows the pod across restarts/reschedules.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $fullname }}-mongodb
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mongodb
+spec:
+  serviceName: {{ $fullname }}-mongodb
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "urlshortener.selectorLabels" $sel | nindent 6 }}
+  # Keep the data volume if the StatefulSet is deleted or scaled down.
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  template:
+    metadata:
+      labels:
+        {{- include "urlshortener.selectorLabels" $sel | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $fullname }}-mongodb
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mongodb
+          image: {{ .Values.mongodb.image }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --wiredTigerCacheSizeGB={{ .Values.mongodb.wiredTigerCacheSizeGB }}
+          ports:
+            - name: mongodb
+              containerPort: 27017
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mongodb.existingSecret }}
+                  key: root-username
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mongodb.existingSecret }}
+                  key: root-password
+            - name: MONGO_APP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mongodb.existingSecret }}
+                  key: app-username
+            - name: MONGO_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mongodb.existingSecret }}
+                  key: app-password
+            - name: MONGO_EXPORTER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mongodb.existingSecret }}
+                  key: exporter-username
+            - name: MONGO_EXPORTER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mongodb.existingSecret }}
+                  key: exporter-password
+          startupProbe:
+            tcpSocket:
+              port: mongodb
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            tcpSocket:
+              port: mongodb
+            periodSeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.mongodb.resources | nindent 12 }}
+          securityContext:
+            {{- include "urlshortener.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+            - name: configdb
+              mountPath: /data/configdb
+            - name: tmp
+              mountPath: /tmp
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+        {{- if .Values.mongodb.exporter.enabled }}
+        # Sidecar exposing MongoDB server metrics (connections, ops, memory) for Prometheus.
+        - name: exporter
+          image: {{ .Values.mongodb.exporter.image }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --mongodb.uri=mongodb://$(MONGO_EXPORTER_USERNAME):$(MONGO_EXPORTER_PASSWORD)@127.0.0.1:27017/admin
+            - --compatible-mode
+            - --collector.diagnosticdata
+            - --collector.dbstats
+            - --web.listen-address=:9216
+          env:
+            - name: MONGO_EXPORTER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mongodb.existingSecret }}
+                  key: exporter-username
+            - name: MONGO_EXPORTER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mongodb.existingSecret }}
+                  key: exporter-password
+          ports:
+            - name: metrics
+              containerPort: 9216
+          resources:
+            requests:
+              cpu: 10m
+              memory: 24Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            {{- include "urlshortener.containerSecurityContext" . | nindent 12 }}
+        {{- end }}
+      volumes:
+        - name: configdb
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: init
+          configMap:
+            name: {{ $fullname }}-mongodb-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "urlshortener.selectorLabels" $sel | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.mongodb.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.mongodb.persistence.size }}
+    {{- if .Values.mongodb.backup.enabled }}
+    # Backup disk. Claimed here so it is provisioned and bound with the pod
+    # (kind's storage binds on first use; a PVC only used by a nightly CronJob
+    # would sit Pending and block `helm --wait`). Deliberately not mounted into
+    # the mongodb container: only the backup CronJob writes to it.
+    # Note: volumeClaimTemplates are immutable, so toggling backups on an
+    # existing release requires recreating the StatefulSet (data PVC is kept).
+    - metadata:
+        name: backup
+        labels:
+          {{- include "urlshortener.selectorLabels" (dict "root" . "component" "mongodb-backup") | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.mongodb.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.mongodb.backup.size }}
+    {{- end }}

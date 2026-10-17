@@ -1,0 +1,111 @@
+# Defaults describe the "real" deployment. Environment files in environments/
+# only override what differs (replicas, image source, optional add-ons), so
+# there is one chart and no copied manifests per environment.
+
+image:
+  # Empty registry = images loaded straight into kind (`kind load`).
+  # CI/release sets this to ghcr.io/<owner>.
+  registry: ""
+  # Set by the deploy script / pipeline to the git SHA. Never "latest".
+  tag: ""
+  pullPolicy: IfNotPresent
+  # e.g. [{name: ghcr-pull}] when pulling private images from ghcr.io.
+  pullSecrets: []
+
+api:
+  repository: urlshortener-api
+  replicaCount: 2
+  port: 8000
+  logLevel: info
+  # Only needed when the web app is served from a different origin.
+  corsOrigins: "http://localhost:8080"
+  jwtExpiresIn: 1h
+  authRateLimit: 20
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    # Memory limit protects the node; no CPU limit to avoid throttling latency
+    # spikes. The CPU request is what the scheduler and HPA use.
+    limits:
+      memory: 256Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+  pdb:
+    minAvailable: 1
+  terminationGracePeriodSeconds: 30
+
+web:
+  repository: urlshortener-web
+  replicaCount: 2
+  port: 8080
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 64Mi
+  pdb:
+    minAvailable: 1
+
+mongodb:
+  image: mongo:8.0
+  # Single instance: one user, one laptop. A 3-member replica set is the
+  # production answer (failover + no data loss on node failure).
+  wiredTigerCacheSizeGB: 0.25
+  persistence:
+    size: 2Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 768Mi
+  # Credentials are created out-of-band by scripts/create-secrets.sh.
+  existingSecret: urlshortener-mongo
+  exporter:
+    enabled: true
+    image: percona/mongodb_exporter:0.47
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"
+    retentionDays: 7
+    size: 2Gi
+
+ingress:
+  enabled: true
+  className: traefik
+  host: ""
+
+tests:
+  image: busybox:1.37
+
+# JWT signing key, created by scripts/create-secrets.sh.
+apiSecret: urlshortener-api
+
+networkPolicy:
+  enabled: true
+  # Namespaces allowed to reach the app.
+  ingressNamespace: platform
+  monitoringNamespace: observability
+
+tracing:
+  enabled: true
+  otlpEndpoint: http://tempo.observability.svc:4318
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+  prometheusRule:
+    enabled: true
+  dashboard:
+    enabled: true
+  # SLO: 99.5% of requests succeed (non-5xx) and are served in under 500ms.
+  slo:
+    availabilityTarget: 0.995
+    latencyThresholdSeconds: 0.5
+  runbookBaseUrl: https://github.com/TUSHAR1651/UrlShortner/blob/main/docs/RUNBOOK.md

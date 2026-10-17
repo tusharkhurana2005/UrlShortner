@@ -1,0 +1,7 @@
+URL Shortener {{ include "urlshortener.version" . }} deployed to namespace {{ .Release.Namespace }}.
+
+  App:      {{ if .Values.ingress.enabled }}http://localhost:8080{{ else }}kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "urlshortener.fullname" . }}-web 8081:{{ .Values.web.port }}{{ end }}
+  Version:  curl -s http://localhost:8080/api/version
+  Smoke:    helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+  History:  helm history {{ .Release.Name }} -n {{ .Release.Namespace }}
+  Rollback: helm rollback {{ .Release.Name }} <REVISION> -n {{ .Release.Namespace }} --wait

@@ -1,0 +1,16 @@
+# Dependencies and build output
+node_modules/
+client/build/
+coverage/
+dist/
+
+# Local environment / secrets: never commit
+.env
+.env.*
+*.pem
+*.key
+kubeconfig*
+
+# Tooling state
+.last-built-tag
+.DS_Store

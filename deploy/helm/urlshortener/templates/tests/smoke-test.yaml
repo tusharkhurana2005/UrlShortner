@@ -1,0 +1,46 @@
+{{- $fullname := include "urlshortener.fullname" . -}}
+# `helm test <release>`: in-cluster check that the API is ready, reports the
+# version that was just deployed, and the web frontend is served.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ $fullname }}-smoke-test
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+    app.kubernetes.io/component: smoke-test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: smoke
+      image: {{ .Values.tests.image }}
+      command: ["/bin/sh", "-ec"]
+      args:
+        - |
+          wget -qO- http://{{ $fullname }}-api:{{ .Values.api.port }}/readyz
+          wget -qO- http://{{ $fullname }}-api:{{ .Values.api.port }}/api/version | tee /tmp/version.json
+          grep -q '"version":"{{ include "urlshortener.version" . }}"' /tmp/version.json
+          wget -qO- http://{{ $fullname }}-web:{{ .Values.web.port }}/ | grep -q '<div id="root">'
+          echo "smoke test passed"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 8Mi
+        limits:
+          memory: 32Mi
+      securityContext:
+        {{- include "urlshortener.containerSecurityContext" . | nindent 8 }}
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}

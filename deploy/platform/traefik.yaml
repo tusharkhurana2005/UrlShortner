@@ -1,0 +1,50 @@
+# Ingress controller. The only entry point into the cluster from the host.
+deployment:
+  replicas: 1
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+providers:
+  kubernetesIngress:
+    enabled: true
+    # Keep routes whose Service has no ready pods and answer 503. Without this
+    # Traefik drops the /api route and requests fall through to the "/" rule,
+    # so the web app would answer API calls with index.html and a 200.
+    allowEmptyServices: true
+  kubernetesCRD:
+    enabled: false
+ports:
+  web:
+    nodePort: 30080
+  websecure:
+    expose:
+      default: false
+service:
+  type: NodePort
+# Edge metrics: what users actually experience (includes requests that never
+# reach the API pods, e.g. when no endpoint is ready).
+metrics:
+  prometheus:
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+# Root span for every request; the API continues the same trace (W3C traceparent).
+tracing:
+  serviceName: traefik
+  otlp:
+    enabled: true
+    http:
+      enabled: true
+      endpoint: http://tempo.observability.svc:4318/v1/traces
+log:
+  format: json
+accessLog:
+  enabled: true
+  format: json
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
