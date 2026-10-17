@@ -19,12 +19,18 @@ ports:
   websecure:
     expose:
       default: false
+# NodePort 30080 is mapped to localhost:8080 by the kind config. There is no
+# cloud load balancer on a laptop, so LoadBalancer would stay <pending>.
 service:
-  type: NodePort
+  spec:
+    type: NodePort
 # Edge metrics: what users actually experience (includes requests that never
 # reach the API pods, e.g. when no endpoint is ready).
 metrics:
   prometheus:
+    # Per-router series: a request that matched the /api route is counted even
+    # when the backend has no ready pods (service-level metrics miss those 503s).
+    addRoutersLabels: true
     serviceMonitor:
       enabled: true
       additionalLabels:

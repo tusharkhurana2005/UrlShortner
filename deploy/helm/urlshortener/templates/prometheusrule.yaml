@@ -1,14 +1,17 @@
 {{- if .Values.monitoring.prometheusRule.enabled }}
 {{- $fullname := include "urlshortener.fullname" . -}}
 {{- $sel := printf "namespace=\"%s\", service=\"%s-api\"" .Release.Namespace $fullname -}}
-{{- $edge := printf "exported_service=~\"%s-%s-api-.*\"" .Release.Namespace $fullname -}}
+{{- /* Traefik routers for the API's ingress paths (/api and /r). */ -}}
+{{- $edge := printf "router=~\"%s-%s-(api|r)@kubernetes\"" .Release.Namespace $fullname -}}
 {{- $errorBudget := subf 1.0 .Values.monitoring.slo.availabilityTarget | printf "%.4f" -}}
 {{- $runbook := .Values.monitoring.runbookBaseUrl -}}
 # SLOs (30-day window), measured at the ingress (Traefik) = what users see:
 #   availability: {{ mulf .Values.monitoring.slo.availabilityTarget 100 }}% of API requests do not return 5xx
 #   latency:      p95 under {{ .Values.monitoring.slo.latencyThresholdSeconds }}s
 # Measuring at the edge matters: when every API pod is NotReady the API's own
-# metrics see no traffic at all, but Traefik records the 503s users get.
+# metrics see no traffic at all, but Traefik's router metrics record the 503s
+# users get (its service-level metrics do not: a service with no ready
+# backend never receives the request).
 # 4xx are client errors and do not consume the error budget. The API's own
 # histogram (per route) is kept for diagnosis.
 apiVersion: monitoring.coreos.com/v1
@@ -24,17 +27,17 @@ spec:
       rules:
         {{- range $w := list "5m" "30m" "1h" "6h" }}
         - record: urlshortener:request_rate:rate{{ $w }}
-          expr: sum(rate(traefik_service_requests_total{ {{ $edge }} }[{{ $w }}]))
+          expr: sum(rate(traefik_router_requests_total{ {{ $edge }} }[{{ $w }}]))
         - record: urlshortener:error_ratio:rate{{ $w }}
           expr: |
-            sum(rate(traefik_service_requests_total{ {{ $edge }}, code=~"5.." }[{{ $w }}]))
+            sum(rate(traefik_router_requests_total{ {{ $edge }}, code=~"5.." }[{{ $w }}]))
             /
-            sum(rate(traefik_service_requests_total{ {{ $edge }} }[{{ $w }}]))
+            sum(rate(traefik_router_requests_total{ {{ $edge }} }[{{ $w }}]))
         {{- end }}
         - record: urlshortener:latency_p95:rate5m
-          expr: histogram_quantile(0.95, sum by (le) (rate(traefik_service_request_duration_seconds_bucket{ {{ $edge }} }[5m])))
+          expr: histogram_quantile(0.95, sum by (le) (rate(traefik_router_request_duration_seconds_bucket{ {{ $edge }} }[5m])))
         - record: urlshortener:latency_p95:rate10m
-          expr: histogram_quantile(0.95, sum by (le) (rate(traefik_service_request_duration_seconds_bucket{ {{ $edge }} }[10m])))
+          expr: histogram_quantile(0.95, sum by (le) (rate(traefik_router_request_duration_seconds_bucket{ {{ $edge }} }[10m])))
         # API-side view (excludes probes and /metrics), used to find which route is failing.
         - record: urlshortener:api_error_ratio_by_route:rate5m
           expr: |

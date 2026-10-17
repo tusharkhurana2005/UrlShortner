@@ -26,6 +26,9 @@ for s in urlshortener-mongo urlshortener-api; do
 done
 
 COMMIT_MSG="$(git -C "${ROOT_DIR}" log -1 --format=%s 2>/dev/null | cut -c1-60 || echo unknown)"
+# The chart/config may come from a newer commit than the images; record both.
+CHART_COMMIT="$(git -C "${ROOT_DIR}" rev-parse --short=7 HEAD 2>/dev/null || echo unknown)"
+[[ -n "$(git -C "${ROOT_DIR}" status --porcelain -- deploy 2>/dev/null)" ]] && CHART_COMMIT="${CHART_COMMIT}-dirty"
 
 # Package the chart with appVersion = image tag, so `helm list/history` show
 # exactly which build each revision deployed.
@@ -44,7 +47,7 @@ helm upgrade --install "${RELEASE}" "${CHART_PKG}" \
   --wait=watcher \
   --timeout "${TIMEOUT}" \
   --history-max 10 \
-  --description "tag=${TAG} env=${ENVIRONMENT} by=${USER:-ci}: ${COMMIT_MSG}"
+  --description "image=${TAG} chart=${CHART_COMMIT} env=${ENVIRONMENT} by=${USER:-ci}: ${COMMIT_MSG}"
 
 log "Rollout complete; running in-cluster smoke test (helm test)"
 helm test "${RELEASE}" --namespace "${NAMESPACE}" --timeout 2m

@@ -457,7 +457,7 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "1 - ((sum(increase(traefik_service_requests_total{exported_service=~\"$namespace-.*-api-.*\", code=~\"5..\"}[3d])) or vector(0)) / sum(increase(traefik_service_requests_total{exported_service=~\"$namespace-.*-api-.*\"}[3d]))) / 0.005",
+     "expr": "1 - ((sum(increase(traefik_router_requests_total{router=~\"$namespace-.*-(api|r)@kubernetes\", code=~\"5..\"}[3d])) or vector(0)) / sum(increase(traefik_router_requests_total{router=~\"$namespace-.*-(api|r)@kubernetes\"}[3d]))) / 0.005",
      "legendFormat": "",
      "instant": true,
      "datasource": {
@@ -654,7 +654,7 @@
    "targets": [
     {
      "refId": "A",
-     "expr": "sum by (code) (rate(traefik_service_requests_total{exported_service=~\"$namespace-.*-api-.*\"}[1m]))",
+     "expr": "sum by (code) (rate(traefik_router_requests_total{router=~\"$namespace-.*-(api|r)@kubernetes\"}[1m]))",
      "legendFormat": "{{code}}",
      "datasource": {
       "type": "prometheus",
