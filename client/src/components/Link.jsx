@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import axios from 'axios';
+import api from '../api';
 import { useParams } from 'react-router-dom';
 
 const Link = () => {
@@ -7,14 +7,10 @@ const Link = () => {
 
     useEffect(() => {
         const getUrl = async () => {
-            console.log(shortId);
             try {
-                axios.get(`http://localhost:8000/url/get`, { params: { shortUrl: shortId } })
+                api.get(`/url/get`, { params: { shortUrl: shortId } })
                     .then((res) => {
-                        console.log(res.data);
-                        const url = res.data.url.redirectUrl;
-                        window.open(res.data.url.redirectUrl , '_blank');
-                        window.location.href = '/dashboard';
+                        window.location.replace(res.data.url.redirectUrl);
                     })
                     .catch((error) => {
                         console.log(error);

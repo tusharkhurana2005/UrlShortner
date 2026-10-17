@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import api from '../api';
 import Cookies from 'js-cookie';
 import { Link } from 'react-router-dom'; // Import Link
 
@@ -11,24 +11,20 @@ const Login = () => {
   const handleSubmit = (e) => {
     e.preventDefault();
 
-    axios.post('http://localhost:8000/user/login', { email, password })
+    api.post('/user/login', { email, password })
       .then((res) => {
-        // console.log(res);
         if (res.data.message === "User Logged In Successfully") {
-          Cookies.set('token', res.data.token);
-          Cookies.set('user_Id', res.data.result._id);
-          console.log(res.data);
+          Cookies.set('token', res.data.token, { sameSite: 'strict' });
+          Cookies.set('user_Id', res.data.result._id, { sameSite: 'strict' });
           window.location.href = '/dashboard';
         }
-        else if (res.data.message === "User not found") {
-          setError(
-            "Email Address or Password is incorrect"
-          );
-        }
-        
       })
       .catch((error) => {
-        console.log(error);
+        if (error.response && (error.response.status === 401 || error.response.status === 400)) {
+          setError("Email Address or Password is incorrect");
+        } else {
+          setError("Login failed, please try again");
+        }
       });
   };
 
