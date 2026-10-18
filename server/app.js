@@ -50,6 +50,14 @@ app.use(pinoHttp({
         if (res.statusCode >= 400) return "warn";
         return "info";
     },
+    // Lean request logs: id, method, route, status and timing are enough to
+    // investigate (the trace has the rest). Logging every header made each
+    // line several KB, drove the log shipper's CPU under load and kept
+    // user agents/IPs we do not need.
+    serializers: {
+        req: (req) => ({ id: req.id, method: req.method, url: req.url }),
+        res: (res) => ({ statusCode: res.statusCode }),
+    },
     genReqId: (req, res) => {
         const id = req.headers["x-request-id"] || crypto.randomUUID();
         res.setHeader("X-Request-Id", id);
