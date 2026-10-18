@@ -4,7 +4,7 @@ TAG ?= $(shell cat .last-built-tag 2>/dev/null)
 REGISTRY ?= ghcr.io/tushar1651
 
 .PHONY: help up cluster secrets platform build deploy deploy-release smoke test lint scan \
-        rollback drift backup restore grafana prometheus status down
+        rollback drift backup restore verify evidence grafana prometheus status down
 
 help: ## Show this help
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-15s\033[0m %s\n",$$1,$$2}'
@@ -58,6 +58,13 @@ backup: ## Run the backup CronJob now
 
 restore: ## Restore the newest backup (or ARCHIVE=<file>)
 	./scripts/restore-backup.sh $(ARCHIVE)
+
+verify: ## Prove security controls and observability work on the live cluster
+	./scripts/verify-security.sh
+	./scripts/verify-observability.sh
+
+evidence: ## Rebuild, redeploy and regenerate docs/evidence (~25 min, runs failure demos)
+	./scripts/collect-evidence.sh
 
 grafana: ## Open Grafana on http://localhost:3000 (prints the admin password)
 	@echo "user: admin  password: $$(kubectl -n observability get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d)"
