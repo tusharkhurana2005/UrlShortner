@@ -7,7 +7,9 @@ const { app, state } = require("../app");
 let mongod;
 
 beforeAll(async () => {
-    mongod = await MongoMemoryServer.create();
+    // Generous launch timeout: on a busy CI runner (or a laptop running the
+    // whole cluster) mongod can take longer than the 10s default to start.
+    mongod = await MongoMemoryServer.create({ instance: { launchTimeout: 60000 } });
     await mongoose.connect(mongod.getUri());
     await mongoose.connection.syncIndexes();
 });

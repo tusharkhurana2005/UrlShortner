@@ -2,6 +2,8 @@
 # Regenerates docs/evidence/ from the live cluster for the current commit:
 # build -> deploy -> verify -> every failure experiment -> quality gates.
 # Takes ~25 minutes. Each file starts with the commit and time it was produced.
+#   ./scripts/collect-evidence.sh            all steps
+#   ./scripts/collect-evidence.sh 06 08      only those steps (after a full run)
 source "$(dirname "$0")/lib.sh"
 E="${ROOT_DIR}/docs/evidence"
 mkdir -p "$E"
@@ -16,7 +18,7 @@ run() { # $1=file $2=title, rest=command
 }
 
 deploy_and_smoke() {
-  "$S/build-images.sh" >/dev/null
+  "$S/build-images.sh" >/dev/null 2>&1
   TAG="$(cat "${ROOT_DIR}/.last-built-tag")"
   echo "\$ make build && make deploy   (image tag ${TAG})"
   "$S/deploy.sh" "$TAG" | grep -vE "^\s*$"
@@ -53,15 +55,20 @@ quality_gates() {
   echo; echo "## gitleaks (full git history)"; gitleaks git "${ROOT_DIR}" --redact --no-banner 2>&1 | tail -2
 }
 
-run 01-deploy-and-smoke-test.txt "Build, deploy and end-to-end smoke test" deploy_and_smoke
-run 02-security-verification.txt "Runtime security controls (scripts/verify-security.sh)" "$S/verify-security.sh"
-run 03-drift-detection-and-remediation.txt "Drift detection and remediation (scripts/demos/drift.sh)" "$S/demos/drift.sh"
-for i in $(seq 1 10); do "$S/smoke-test.sh" >/dev/null 2>&1 || true; done
-run 04-observability.txt "Metrics, logs, traces and their correlation (scripts/verify-observability.sh)" "$S/verify-observability.sh"
-run 05-bad-release-auto-rollback.txt "Bad release is rolled back automatically (scripts/demos/bad-release.sh)" "$S/demos/bad-release.sh"
-run 06-mongodb-outage-and-recovery.txt "MongoDB outage: symptom, evidence, action, verification (scripts/demos/mongodb-outage.sh)" env OUTAGE_SECONDS=240 "$S/demos/mongodb-outage.sh"
-run 07-node-drain.txt "Node maintenance with PDBs and topology spread (scripts/demos/node-drain.sh)" "$S/demos/node-drain.sh"
-run 08-autoscaling.txt "Horizontal Pod Autoscaler under load (scripts/demos/autoscale.sh)" "$S/demos/autoscale.sh"
-run 09-backup-restore-drill.txt "Backup and restore drill (scripts/demos/backup-restore.sh)" "$S/demos/backup-restore.sh"
-run 10-quality-gates.txt "Local run of the CI quality gates" quality_gates
+STEPS="${*:-01 02 03 04 05 06 07 08 09 10}"
+want() { [[ " ${STEPS} " == *" $1 "* ]]; }
+
+want 01 && run 01-deploy-and-smoke-test.txt "Build, deploy and end-to-end smoke test" deploy_and_smoke
+want 02 && run 02-security-verification.txt "Runtime security controls (scripts/verify-security.sh)" "$S/verify-security.sh"
+want 03 && run 03-drift-detection-and-remediation.txt "Drift detection and remediation (scripts/demos/drift.sh)" "$S/demos/drift.sh"
+if want 04; then
+  for _ in $(seq 1 10); do "$S/smoke-test.sh" >/dev/null 2>&1 || true; done
+  run 04-observability.txt "Metrics, logs, traces and their correlation (scripts/verify-observability.sh)" "$S/verify-observability.sh"
+fi
+want 05 && run 05-bad-release-auto-rollback.txt "Bad release is rolled back automatically (scripts/demos/bad-release.sh)" "$S/demos/bad-release.sh"
+want 06 && run 06-mongodb-outage-and-recovery.txt "MongoDB outage: symptom, evidence, action, verification (scripts/demos/mongodb-outage.sh)" env OUTAGE_SECONDS=240 "$S/demos/mongodb-outage.sh"
+want 07 && run 07-node-drain.txt "Node maintenance with PDBs and topology spread (scripts/demos/node-drain.sh)" "$S/demos/node-drain.sh"
+want 08 && run 08-autoscaling.txt "Horizontal Pod Autoscaler under load (scripts/demos/autoscale.sh)" "$S/demos/autoscale.sh"
+want 09 && run 09-backup-restore-drill.txt "Backup and restore drill (scripts/demos/backup-restore.sh)" "$S/demos/backup-restore.sh"
+want 10 && run 10-quality-gates.txt "Local run of the CI quality gates" quality_gates
 log "Evidence written to docs/evidence/"
