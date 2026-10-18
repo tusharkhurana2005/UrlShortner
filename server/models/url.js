@@ -4,7 +4,8 @@ const mongo = require("mongoose");
 const urlSchema = new mongo.Schema({
     userId: {
         type: mongo.Schema.Types.ObjectId,
-        required: true
+        required: true,
+        index: true
     },
     redirectUrl: {
         type: String,
@@ -12,14 +13,10 @@ const urlSchema = new mongo.Schema({
     },
     shortUrl: {
         type: String,
-        required: true
-    },
-    TimeStamp: {
-        type: [],
-        default: [Date.now()]
+        required: true,
+        unique: true
     }
-
-})
+}, { timestamps: true })
 
 
 const Url = mongo.model("Url", urlSchema);

@@ -1,0 +1,168 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $fullname := include "urlshortener.fullname" . -}}
+{{- $ns := .Release.Namespace -}}
+# Zero-trust inside the namespace: deny everything, then allow only the flows
+# the request path needs:
+#   ingress controller -> web, api      api -> mongodb      prometheus -> metrics
+#   api -> tempo (traces)               everyone -> DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-default-deny
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-allow-dns
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-web
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "urlshortener.selectorLabels" (dict "root" . "component" "web") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace }}
+        # helm test pods in this namespace
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: smoke-test
+      ports:
+        - { protocol: TCP, port: {{ .Values.web.port }} }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-api
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "urlshortener.selectorLabels" (dict "root" . "component" "api") | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: smoke-test
+      ports:
+        - { protocol: TCP, port: {{ .Values.api.port }} }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "urlshortener.selectorLabels" (dict "root" . "component" "mongodb") | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 27017 }
+    {{- if .Values.tracing.enabled }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace }}
+      ports:
+        - { protocol: TCP, port: 4318 }
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-mongodb
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "urlshortener.selectorLabels" (dict "root" . "component" "mongodb") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "urlshortener.selectorLabels" (dict "root" . "component" "api") | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "urlshortener.selectorLabels" (dict "root" . "component" "mongodb-backup") | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 27017 }
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace }}
+      ports:
+        - { protocol: TCP, port: 9216 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-backup
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "urlshortener.selectorLabels" (dict "root" . "component" "mongodb-backup") | nindent 6 }}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "urlshortener.selectorLabels" (dict "root" . "component" "mongodb") | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 27017 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-smoke-test
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: smoke-test
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.api.port }} }
+        - { protocol: TCP, port: {{ .Values.web.port }} }
+{{- end }}

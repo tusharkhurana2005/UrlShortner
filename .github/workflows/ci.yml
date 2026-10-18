@@ -1,0 +1,294 @@
+# Pipeline: every PR and every push to main runs the same gates.
+#
+#   api ─┐                      ┌─ e2e (kind) ── publish (main only)
+#   web ─┼─ images (build+scan) ┤
+#   config ─────────────────────┘
+#
+# A change can only reach the registry if it passed unit tests, linting,
+# dependency/image/config scans, a real Kubernetes deployment and the
+# end-to-end user journey, and if an automatic rollback was proven to work.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege by default; jobs that need more ask for it explicitly.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "24"
+  HELM_VERSION: v4.3.1
+  # The commit being tested (the PR head, not GitHub's temporary merge commit),
+  # so image tags point at a commit that exists in the repository.
+  COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  api:
+    name: API · lint, test, audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - name: Unit + integration tests (in-memory MongoDB)
+        run: npm test -- --coverage
+      - name: Dependency audit (runtime deps, high+)
+        run: npm audit --omit=dev --audit-level=high
+
+  web:
+    name: Web · test, build, audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm test -- --watchAll=false
+        env:
+          CI: "true"
+      - run: npm run build
+        env:
+          CI: "true"
+      - name: Dependency audit (shipped deps, high+)
+        run: npm audit --omit=dev --audit-level=high
+
+  config:
+    name: Config · Helm, manifests, Dockerfiles, secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Secret scan (full history)
+        run: |
+          # safe.directory: the checkout is owned by the runner user, not the
+          # container user. Without it git refuses the repo and gitleaks scans
+          # nothing yet still reports "no leaks found", so also assert that
+          # commits were actually scanned.
+          set +e
+          out=$(docker run --rm -v "$PWD:/repo" \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
+            ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --redact --no-banner 2>&1); rc=$?
+          set -e
+          echo "$out"
+          [ "$rc" -eq 0 ] || exit "$rc"
+          echo "$out" | grep -qE '[1-9][0-9]* commits scanned' || { echo "::error::gitleaks scanned no commits"; exit 1; }
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: helm lint (every environment)
+        run: |
+          for env in deploy/helm/urlshortener/environments/*.yaml; do
+            helm lint deploy/helm/urlshortener --strict -f "$env" --set image.tag=ci
+          done
+      - name: Validate rendered manifests against Kubernetes + CRD schemas
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          for env in deploy/helm/urlshortener/environments/*.yaml; do
+            echo "== $env"
+            helm template urlshortener deploy/helm/urlshortener -n urlshortener -f "$env" --set image.tag=ci \
+              | ./kubeconform -strict -summary -kubernetes-version 1.34.0 \
+                  -schema-location default \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          done
+      - name: Lint Dockerfiles
+        run: |
+          for f in server/Dockerfile client/Dockerfile; do
+            docker run --rm -i hadolint/hadolint:v2.15.1 < "$f"
+          done
+      - name: Misconfiguration scan (Helm chart + Dockerfiles)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          # node_modules is committed in the baseline (see docs/BASELINE.md); it
+          # is third-party code and never part of an image or a deployment.
+          skip-dirs: client/node_modules,server/node_modules
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          trivyignores: .trivyignore
+
+  images:
+    name: Image · build + scan (${{ matrix.component }})
+    needs: [api, web]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - component: api
+            context: server
+          - component: web
+            context: client
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Compute tag
+        run: |
+          echo "TAG=${COMMIT_SHA::7}" >> "$GITHUB_ENV"
+          echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build ${{ matrix.component }}
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          tags: urlshortener-${{ matrix.component }}:${{ env.TAG }}
+          build-args: |
+            APP_VERSION=${{ env.TAG }}
+            GIT_COMMIT=${{ env.COMMIT_SHA }}
+            BUILD_TIME=${{ env.BUILD_TIME }}
+          outputs: type=docker,dest=${{ runner.temp }}/${{ matrix.component }}.tar
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+      - name: Vulnerability scan (fail on fixable HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          input: ${{ runner.temp }}/${{ matrix.component }}.tar
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-${{ matrix.component }}
+          path: ${{ runner.temp }}/${{ matrix.component }}.tar
+          retention-days: 3
+
+  e2e:
+    name: Deploy to kind · user journey · rollback
+    needs: [images, config]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: echo "TAG=${COMMIT_SHA::7}" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: image-*
+          path: ${{ runner.temp }}/images
+          merge-multiple: true
+      - name: Create kind cluster (same config as local)
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          version: v0.33.0
+          cluster_name: urlshortener
+          config: deploy/kind/cluster.yaml
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: Load the images built and scanned above
+        run: |
+          for c in api web; do
+            docker load -i "${{ runner.temp }}/images/$c.tar"
+            kind load docker-image "urlshortener-$c:$TAG" --name urlshortener
+          done
+      - name: Ingress controller
+        run: ./scripts/platform-up.sh --ingress-only
+      - name: Generate secrets in the cluster
+        run: ./scripts/create-secrets.sh
+      - name: Deploy (helm --rollback-on-failure, then helm test)
+        run: ENVIRONMENT=ci ./scripts/deploy.sh "$TAG"
+      - name: User journey through the ingress
+        run: ./scripts/smoke-test.sh http://localhost:8080 "$TAG"
+      - name: No drift between release and cluster
+        run: ./scripts/drift-check.sh
+      - name: A broken release is rolled back automatically
+        run: |
+          # Deploy a tag that does not exist: pods never become Ready, Helm
+          # must restore the previous revision and users must not notice.
+          if ENVIRONMENT=ci TIMEOUT=90s ./scripts/deploy.sh "broken-${TAG}"; then
+            echo "::error::broken release was accepted"; exit 1
+          fi
+          helm history urlshortener -n urlshortener --max 4
+          ./scripts/smoke-test.sh http://localhost:8080 "$TAG"
+      - name: Debug info on failure
+        if: failure()
+        run: |
+          kubectl get all,ingress,pvc,networkpolicy -n urlshortener -o wide || true
+          kubectl describe pods -n urlshortener || true
+          kubectl logs -n urlshortener -l app.kubernetes.io/component=api --tail=100 --all-containers || true
+          kubectl get events -n urlshortener --sort-by=.lastTimestamp | tail -40 || true
+
+  publish:
+    name: Publish images + chart (main only)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: e2e
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write        # push to ghcr.io
+      id-token: write        # sign build provenance
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Names
+        run: |
+          echo "TAG=${COMMIT_SHA::7}" >> "$GITHUB_ENV"
+          echo "REGISTRY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: image-*
+          path: ${{ runner.temp }}/images
+          merge-multiple: true
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the exact images that passed e2e (immutable SHA tags)
+        id: push
+        run: |
+          for c in api web; do
+            docker load -i "${{ runner.temp }}/images/$c.tar"
+            docker tag "urlshortener-$c:$TAG" "$REGISTRY/urlshortener-$c:$TAG"
+            docker push "$REGISTRY/urlshortener-$c:$TAG"
+            digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/urlshortener-$c:$TAG" | cut -d@ -f2)
+            echo "${c}_digest=$digest" >> "$GITHUB_OUTPUT"
+            echo "pushed $REGISTRY/urlshortener-$c:$TAG@$digest" >> "$GITHUB_STEP_SUMMARY"
+          done
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.REGISTRY }}/urlshortener-api
+          subject-digest: ${{ steps.push.outputs.api_digest }}
+          push-to-registry: true
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.REGISTRY }}/urlshortener-web
+          subject-digest: ${{ steps.push.outputs.web_digest }}
+          push-to-registry: true
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: Package chart with appVersion = commit
+        run: helm package deploy/helm/urlshortener --app-version "$TAG" --destination dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: helm-chart-${{ env.TAG }}
+          path: dist/*.tgz
+      - name: How to deploy this build
+        run: |
+          {
+            echo "### Deploy this build to the local cluster"
+            echo '```'
+            echo "REGISTRY=$REGISTRY make deploy-release TAG=$TAG"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,25 @@
+# Throwaway kind cluster inside the GitHub Actions runner, created from the
+# same deploy/kind/cluster.yaml and fronted by the same Traefik ingress as the
+# local cluster. It proves the release deploys, passes its probes and serves
+# the user journey. The monitoring stack is not installed there, so its
+# CRD-based objects are switched off.
+api:
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+web:
+  replicaCount: 1
+mongodb:
+  exporter:
+    enabled: false
+  backup:
+    enabled: false
+tracing:
+  enabled: false
+monitoring:
+  serviceMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false
+  dashboard:
+    enabled: false

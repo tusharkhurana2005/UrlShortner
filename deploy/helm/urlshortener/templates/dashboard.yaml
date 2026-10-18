@@ -1,0 +1,14 @@
+{{- if .Values.monitoring.dashboard.enabled }}
+# Grafana's sidecar loads any ConfigMap labelled grafana_dashboard=1, so the
+# dashboard is versioned and deployed with the app instead of clicked together.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "urlshortener.fullname" . }}-dashboard
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  urlshortener-overview.json: |-
+{{ .Files.Get "files/dashboard.json" | indent 4 }}
+{{- end }}

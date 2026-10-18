@@ -1,0 +1,82 @@
+{{- if .Values.mongodb.backup.enabled }}
+{{- $fullname := include "urlshortener.fullname" . -}}
+{{- $sel := dict "root" . "component" "mongodb-backup" -}}
+# Nightly logical backup (mongodump) of the Urls database, kept for N days.
+# Uses the app's readWrite user (enough to read its own DB), not root.
+# Writes to the "backup" volume claimed by the MongoDB StatefulSet (see
+# mongodb.yaml): a separate disk from the data, retained if the release is
+# deleted. Off-cluster object storage would be the production choice.
+# Restore: see docs/RUNBOOK.md#restore-from-backup
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $fullname }}-mongodb-backup
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mongodb-backup
+spec:
+  schedule: {{ .Values.mongodb.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            {{- include "urlshortener.selectorLabels" $sel | nindent 12 }}
+        spec:
+          restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup
+              image: {{ .Values.mongodb.image }}
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/bash", "-ec"]
+              args:
+                - |
+                  file="/backup/urls-$(date -u +%Y%m%dT%H%M%SZ).archive.gz"
+                  mongodump --uri="mongodb://${MONGO_USER}:${MONGO_PASSWORD}@{{ include "urlshortener.mongodbHost" . }}:27017/Urls?authSource=Urls" \
+                    --db=Urls --archive="${file}" --gzip
+                  find /backup -name 'urls-*.archive.gz' -mtime +{{ .Values.mongodb.backup.retentionDays }} -delete
+                  echo "backup written: ${file}"; ls -lh /backup
+              env:
+                - name: MONGO_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.mongodb.existingSecret }}
+                      key: app-username
+                - name: MONGO_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.mongodb.existingSecret }}
+                      key: app-password
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              securityContext:
+                {{- include "urlshortener.containerSecurityContext" . | nindent 16 }}
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: backup
+              persistentVolumeClaim:
+                claimName: backup-{{ $fullname }}-mongodb-0
+            - name: tmp
+              emptyDir: {}
+{{- end }}

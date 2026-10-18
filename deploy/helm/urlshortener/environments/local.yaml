@@ -1,0 +1,5 @@
+# Laptop cluster (kind). Images are built locally and loaded into kind, so
+# there is no registry. Everything else uses the chart defaults.
+image:
+  registry: ""
+  pullPolicy: IfNotPresent

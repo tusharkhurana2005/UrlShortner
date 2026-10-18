@@ -1,0 +1,20 @@
+# Local Kubernetes cluster: 1 control-plane + 2 workers.
+# Two workers let topology spread / PodDisruptionBudgets / node drains be
+# demonstrated for real instead of everything landing on one node.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: urlshortener
+nodes:
+  - role: control-plane
+    # The ingress controller's NodePort 30080 is published on the host as
+    # localhost:8080. This is the only port the cluster exposes to the host.
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+        listenAddress: "127.0.0.1"
+        protocol: TCP
+  - role: worker
+  - role: worker
+networking:
+  # kindnet (the default CNI) enforces NetworkPolicy since kind v0.24.
+  disableDefaultCNI: false

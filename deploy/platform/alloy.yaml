@@ -1,0 +1,72 @@
+# Grafana Alloy ships container logs to Loki. It reads logs through the
+# Kubernetes API (loki.source.kubernetes), so it needs no hostPath mounts and a
+# single replica is enough for a 3-node cluster.
+controller:
+  type: deployment
+  replicas: 1
+alloy:
+  # CPU is capped on purpose: in the load test (82k requests) Alloy spent ~10
+  # cores catching up on the log backlog on the same node as the API. A log
+  # shipper should fall behind, not compete with the application.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: "1"
+      memory: 384Mi
+  configMap:
+    content: |
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.relabel "pods" {
+        targets = discovery.kubernetes.pods.targets
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          target_label  = "app"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_component"]
+          target_label  = "component"
+        }
+      }
+
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pods.output
+        forward_to = [loki.process.app.receiver]
+      }
+
+      // The API logs JSON with a string level ("info", "error", ...):
+      // promote it to a label so {app="urlshortener", level="error"} works.
+      loki.process "app" {
+        stage.match {
+          selector = "{app=\"urlshortener\", component=\"api\"}"
+          stage.json {
+            expressions = { level = "level" }
+          }
+          stage.labels {
+            values = { level = "" }
+          }
+        }
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.observability.svc:3100/loki/api/v1/push"
+        }
+      }

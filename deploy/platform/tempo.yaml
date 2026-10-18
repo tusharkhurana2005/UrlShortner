@@ -1,0 +1,13 @@
+# Tempo single binary with local storage. Receives OTLP over HTTP (4318) from
+# Traefik and the API.
+tempo:
+  retention: 72h
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+persistence:
+  enabled: true
+  size: 5Gi

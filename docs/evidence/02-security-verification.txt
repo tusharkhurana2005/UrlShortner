@@ -1,0 +1,33 @@
+# Runtime security controls (scripts/verify-security.sh)
+# commit 1a11338f5d02da1734286310802267a05152a30b, generated 2026-10-18T13:36:59Z
+
+1. Pod Security Admission on namespace urlshortener
+     "pod-security.kubernetes.io/enforce":"restricted"
+     "pod-security.kubernetes.io/warn":"restricted"}
+  OK   privileged pod rejected by the API server
+2. Workload hardening (every running container)
+     urlshortener-api-6694dccf88-4h8tp  api       {'nonRoot': True, 'uid': 1000, 'readOnlyFS': True, 'noPrivEsc': True, 'capsDropped': True, 'seccomp': 'RuntimeDefault', 'saToken': False}
+     urlshortener-api-6694dccf88-5wk8p  api       {'nonRoot': True, 'uid': 1000, 'readOnlyFS': True, 'noPrivEsc': True, 'capsDropped': True, 'seccomp': 'RuntimeDefault', 'saToken': False}
+     urlshortener-api-8599c57f96-8blxd  api       {'nonRoot': True, 'uid': 1000, 'readOnlyFS': True, 'noPrivEsc': True, 'capsDropped': True, 'seccomp': 'RuntimeDefault', 'saToken': False}
+     urlshortener-api-8599c57f96-gtzjw  api       {'nonRoot': True, 'uid': 1000, 'readOnlyFS': True, 'noPrivEsc': True, 'capsDropped': True, 'seccomp': 'RuntimeDefault', 'saToken': False}
+     urlshortener-mongodb-0             mongodb   {'nonRoot': True, 'uid': 999, 'readOnlyFS': True, 'noPrivEsc': True, 'capsDropped': True, 'seccomp': 'RuntimeDefault', 'saToken': False}
+     urlshortener-mongodb-0             exporter  {'nonRoot': True, 'uid': 999, 'readOnlyFS': True, 'noPrivEsc': True, 'capsDropped': True, 'seccomp': 'RuntimeDefault', 'saToken': False}
+     urlshortener-web-567c5c46fd-tl4zb  web       {'nonRoot': True, 'uid': 101, 'readOnlyFS': True, 'noPrivEsc': True, 'capsDropped': True, 'seccomp': 'RuntimeDefault', 'saToken': False}
+     urlshortener-web-567c5c46fd-wtmpr  web       {'nonRoot': True, 'uid': 101, 'readOnlyFS': True, 'noPrivEsc': True, 'capsDropped': True, 'seccomp': 'RuntimeDefault', 'saToken': False}
+     urlshortener-web-644bdff558-br5lm  web       {'nonRoot': True, 'uid': 101, 'readOnlyFS': True, 'noPrivEsc': True, 'capsDropped': True, 'seccomp': 'RuntimeDefault', 'saToken': False}
+  OK   API process runs as uid 1000
+  OK   API cannot modify its own filesystem
+  OK   no Kubernetes API token in the API pod
+3. NetworkPolicy enforcement
+  OK   api -> mongodb:27017: allow
+  OK   web -> mongodb:27017: deny
+  OK   web -> api:8000 (web is static, needs nothing): deny
+  OK   api -> internet (egress): deny
+  OK   pod in 'default' namespace -> mongodb: deny
+4. Exposure: only the ingress is reachable from the host
+  OK   /metrics not exposed through the ingress (got 200 from the web app)
+     non-ClusterIP service: platform/traefik NodePort
+5. Secrets
+     urlshortener-api
+     urlshortener-mongo
+  OK   no hard-coded credentials in tracked files (gitleaks runs in CI over full history)

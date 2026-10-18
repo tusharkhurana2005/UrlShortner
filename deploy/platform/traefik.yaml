@@ -1,0 +1,79 @@
+# Ingress controller. The only entry point into the cluster from the host.
+# Two replicas on different nodes + a PDB: every user request passes through
+# here, so a single replica would make any node drain an outage.
+deployment:
+  replicas: 2
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+    # Ignore the tainted control-plane node, and during a rolling update only
+    # count pods of the new ReplicaSet.
+    nodeTaintsPolicy: Honor
+    matchLabelKeys: ["pod-template-hash"]
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: traefik
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+providers:
+  kubernetesIngress:
+    enabled: true
+    # Keep routes whose Service has no ready pods and answer 503. Without this
+    # Traefik drops the /api route and requests fall through to the "/" rule,
+    # so the web app would answer API calls with index.html and a 200.
+    allowEmptyServices: true
+  kubernetesCRD:
+    enabled: false
+ports:
+  web:
+    nodePort: 30080
+    # On SIGTERM keep accepting for 5s while kube-proxy removes this pod from
+    # the endpoints, then give in-flight requests up to 10s. Without this a
+    # Traefik rollout or node drain drops the requests in flight.
+    transport:
+      lifeCycle:
+        requestAcceptGraceTimeout: 5s
+        graceTimeOut: 10s
+  websecure:
+    expose:
+      default: false
+# NodePort 30080 is mapped to localhost:8080 by the kind config. There is no
+# cloud load balancer on a laptop, so LoadBalancer would stay <pending>.
+service:
+  spec:
+    type: NodePort
+# Edge metrics: what users actually experience (includes requests that never
+# reach the API pods, e.g. when no endpoint is ready).
+metrics:
+  prometheus:
+    # Per-router series: a request that matched the /api route is counted even
+    # when the backend has no ready pods (service-level metrics miss those 503s).
+    addRoutersLabels: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+# Root span for every request; the API continues the same trace (W3C traceparent).
+tracing:
+  serviceName: traefik
+  otlp:
+    enabled: true
+    http:
+      enabled: true
+      endpoint: http://tempo.observability.svc:4318/v1/traces
+log:
+  format: json
+accessLog:
+  enabled: true
+  format: json
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi

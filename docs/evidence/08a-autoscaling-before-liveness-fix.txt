@@ -1,0 +1,48 @@
+# Horizontal Pod Autoscaler under load (scripts/demos/autoscale.sh)
+# commit cf27a7de2317f18d5099b6daf67e67a1e26bf655, generated 2026-10-18T13:04:52Z
+
+## Before
+  18:34:52  cpu: <unknown>/70%  replicas=2
+
+## 150s of load: ApacheBench, 25 concurrent clients on GET /api/version through the ingress
+  18:35:07  cpu: 32%/70%  replicas=2
+  18:35:23  cpu: 298%/70%  replicas=2
+  18:35:38  cpu: 1476%/70%  replicas=5
+  18:35:54  cpu: 1476%/70%  replicas=5
+  18:36:09  cpu: 827%/70%  replicas=5
+  18:36:25  cpu: 954%/70%  replicas=5
+  18:36:44  cpu: <unknown>/70%  replicas=5
+  18:37:04  cpu: <unknown>/70%  replicas=5
+  18:37:20  cpu: <unknown>/70%  replicas=5
+  18:37:37  cpu: <unknown>/70%  replicas=5
+  Complete requests:      95448
+  Failed requests:        192
+  Non-2xx responses:      192
+  Requests per second:    636.11 [#/sec] (mean)
+  Time per request:       39.301 [ms] (mean)
+    99%    477
+
+## After the load stops: HPA scales back down after its 120s stabilization window
+  18:37:53  cpu: <unknown>/70%  replicas=5
+  18:38:08  cpu: <unknown>/70%  replicas=5
+  18:38:23  cpu: 32%/70%  replicas=5
+  18:38:39  cpu: 28%/70%  replicas=5
+  18:38:54  cpu: 30%/70%  replicas=5
+  18:39:09  cpu: 29%/70%  replicas=5
+  18:39:24  cpu: 33%/70%  replicas=5
+  18:39:39  cpu: 36%/70%  replicas=5
+  18:39:55  cpu: 27%/70%  replicas=5
+  18:40:10  cpu: 21%/70%  replicas=5
+  18:40:25  cpu: 23%/70%  replicas=3
+  18:40:40  cpu: 30%/70%  replicas=3
+  18:40:55  cpu: 26%/70%  replicas=3
+  18:41:10  cpu: 36%/70%  replicas=3
+  18:41:26  cpu: 36%/70%  replicas=3
+  18:41:41  cpu: 38%/70%  replicas=3
+  18:41:56  cpu: 30%/70%  replicas=2
+
+## Scaling events
+  9m59s       Normal   SuccessfulRescale   horizontalpodautoscaler/urlshortener-api   New size: 2; reason: All metrics below target
+  6m42s       Normal   SuccessfulRescale   horizontalpodautoscaler/urlshortener-api   New size: 5; reason: cpu resource utilization (percentage of request) above target
+  116s        Normal   SuccessfulRescale   horizontalpodautoscaler/urlshortener-api   New size: 3; reason: All metrics below target
+  25s         Normal   SuccessfulRescale   horizontalpodautoscaler/urlshortener-api   New size: 2; reason: All metrics below target

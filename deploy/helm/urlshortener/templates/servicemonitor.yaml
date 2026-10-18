@@ -1,0 +1,37 @@
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+{{- $fullname := include "urlshortener.fullname" . -}}
+# Prometheus scrapes the API's /metrics (RED metrics, business counters,
+# build info) every 15s.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $fullname }}-api
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  selector:
+    matchLabels:
+      {{- include "urlshortener.selectorLabels" (dict "root" . "component" "api") | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+{{- if .Values.mongodb.exporter.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $fullname }}-mongodb
+  labels:
+    {{- include "urlshortener.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mongodb
+spec:
+  selector:
+    matchLabels:
+      {{- include "urlshortener.selectorLabels" (dict "root" . "component" "mongodb") | nindent 6 }}
+  endpoints:
+    - port: metrics
+      interval: 30s
+{{- end }}
+{{- end }}

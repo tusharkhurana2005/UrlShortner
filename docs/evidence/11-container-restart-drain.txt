@@ -1,0 +1,32 @@
+# Container restart under traffic drains without errors (scripts/demos/container-restart.sh)
+# commit 1a11338f5d02da1734286310802267a05152a30b, generated 2026-10-18T13:53:10Z
+
+## Before
+    POD                                 READY   RESTARTS
+    urlshortener-api-8599c57f96-cl7rr   true    0
+    urlshortener-api-8599c57f96-q78lx   true    0
+    urlshortener-api-8599c57f96-qgdgb   true    1
+
+## 19:23:15 SIGTERM to the API process (PID 1) in urlshortener-api-8599c57f96-cl7rr: the container restarts, the pod stays
+
+## 19:23:23 While draining: readiness fails, requests are still answered
+    POD                                 READY   RESTARTS
+    urlshortener-api-8599c57f96-cl7rr   false   0
+    urlshortener-api-8599c57f96-q78lx   true    0
+    urlshortener-api-8599c57f96-qgdgb   true    1
+    urlshortener-api-8599c57f96-cl7rr ready=false
+    urlshortener-api-8599c57f96-qgdgb ready=true
+    urlshortener-api-8599c57f96-q78lx ready=true
+user traffic during the experiment: 108 requests, 108 OK, 0 failed
+  HTTP 200 x 108
+
+## After: container restarted once and is Ready again
+    POD                                 READY   RESTARTS
+    urlshortener-api-8599c57f96-cl7rr   true    1
+    urlshortener-api-8599c57f96-q78lx   true    0
+    urlshortener-api-8599c57f96-qgdgb   true    1
+
+## The pod's own log of the shutdown
+    {"level":"info","time":"2026-10-18T13:53:15.516Z","service":"urlshortener-api","version":"1a11338","signal":"SIGTERM","drainSeconds":12,"msg":"Shutting down: dr
+    {"level":"info","time":"2026-10-18T13:53:27.545Z","service":"urlshortener-api","version":"1a11338","msg":"Drain period over, closing server"}
+    {"level":"info","time":"2026-10-18T13:53:27.646Z","service":"urlshortener-api","version":"1a11338","msg":"Shutdown complete"}

@@ -1,22 +1,24 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import api from '../api';
 import { Link } from 'react-router-dom'; // Import Link
 
 const Signup = () => {
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        axios.post('http://localhost:8000/user/signup', { name, email, password })
+        api.post('/user/signup', { name, email, password })
             .then((res) => {
                 if (res.data.message === 'User Created Successfully') {
+                    setError('');
                     alert('User Created Successfully');
                 }
             })
             .catch((error) => {
-                console.log(error);
+                setError(error.response?.data?.message || 'Signup failed, please try again');
             });
     };
 
@@ -66,6 +68,8 @@ const Signup = () => {
                     <span className="text-sm text-gray-600">Already have an account? </span>
                     <Link to="/login" className="text-blue-500 hover:underline">Login</Link>
                 </div>
+
+                {error && <p className="text-red-500 mt-4 text-center">{error}</p>}
             </div>
         </div>
     );

@@ -1,0 +1,8 @@
+# Feeds CPU/memory to the HorizontalPodAutoscaler and `kubectl top`.
+# kind's kubelets use self-signed certificates, hence insecure TLS (local only).
+args:
+  - --kubelet-insecure-tls
+resources:
+  requests:
+    cpu: 20m
+    memory: 48Mi

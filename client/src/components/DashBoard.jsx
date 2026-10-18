@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import Cookies from 'js-cookie';
+import api from '../api';
 import { Trash2, Link, ExternalLink, Copy } from 'lucide-react';
 
 const DashBoard = () => {
     const [urlInput, setUrlInput] = useState('');
     const [urls, setUrls] = useState([]);
-    const userId = Cookies.get('user_Id');
+    const [error, setError] = useState('');
 
     const handleCreateShortUrl = () => {
         if (!urlInput) {
@@ -15,13 +14,14 @@ const DashBoard = () => {
 
 
         
-        axios.post('http://localhost:8000/url/create', { Url: urlInput, userId })
+        api.post('/url/create', { Url: urlInput })
             .then((res) => {
                 setUrlInput('');
+                setError('');
                 getAllUrls();
             })
             .catch((error) => {
-                console.log(error);
+                setError(error.response?.data?.message || 'Could not shorten this URL');
             });
     };
 
@@ -30,7 +30,7 @@ const DashBoard = () => {
     }, []);
 
     const getAllUrls = () => {
-        axios.get('http://localhost:8000/url/allUrls', { params: { userId } })
+        api.get('/url/allUrls')
             .then((res) => {
                 setUrls(res.data.urls);
             })
@@ -40,7 +40,7 @@ const DashBoard = () => {
     };
 
     const handleDelete = (shortId) => {
-        axios.delete(`http://localhost:8000/url/delete/${shortId}`)
+        api.delete(`/url/delete/${shortId}`)
             .then(() => {
                 getAllUrls();
             })
@@ -50,12 +50,12 @@ const DashBoard = () => {
     };
 
     const handleCopy = (shortId) => {
-        const fullUrl = `${window.location.origin}/link/${shortId}`;
+        const fullUrl = `${window.location.origin}/r/${shortId}`;
         navigator.clipboard.writeText(fullUrl);
     };
 
     const handleShortLinkClick = (shortId) => {
-        window.open(`/link/${shortId}`, '_blank');
+        window.open(`/r/${shortId}`, '_blank');
     };
 
     return (
@@ -83,6 +83,7 @@ const DashBoard = () => {
                                 Shorten URL
                             </button>
                         </div>
+                        {error && <p className="text-red-500 mt-2">{error}</p>}
                     </div>
 
                     <div className="space-y-6">

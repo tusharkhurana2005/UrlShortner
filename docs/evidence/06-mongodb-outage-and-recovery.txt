@@ -1,0 +1,85 @@
+# MongoDB outage: symptom, evidence, action, verification (scripts/demos/mongodb-outage.sh)
+# commit cf27a7de2317f18d5099b6daf67e67a1e26bf655, generated 2026-10-18T12:59:26Z
+
+## 18:29:26 Baseline
+  readiness of API pods:
+    POD                                 READY   RESTARTS
+    urlshortener-api-67b975d769-6wp27   true    0
+    urlshortener-api-67b975d769-76f78   true    0
+    urlshortener-api-67b975d769-bcvwq   true    0
+    urlshortener-api-67b975d769-m46lb   true    0
+    urlshortener-api-67b975d769-zwlhj   true    0
+  firing app alerts:
+    {'alertname': 'UrlShortenerPodRestarting', 'alertstate': 'firing', 'pod': 'urlshortener-api-5f45546fc7-jp266', 'severity': 'warning'} 1
+
+## 18:29:26 FAULT: MongoDB stops (StatefulSet scaled to 0, like a crashed DB pod/node)
+statefulset.apps/urlshortener-mongodb scaled
+
+## 18:30:06 SYMPTOM (what a user gets)
+  GET /api/version -> 503
+  GET /r/anything  -> 503
+  response body: no available server
+
+## 18:30:06 EVIDENCE
+  API pods: Running but NOT Ready (readiness = Mongo connected); RESTARTS unchanged (liveness ignores Mongo):
+    POD                                 READY   RESTARTS
+    urlshortener-api-67b975d769-6wp27   false   0
+    urlshortener-api-67b975d769-76f78   false   0
+    urlshortener-api-67b975d769-bcvwq   false   0
+    urlshortener-api-67b975d769-m46lb   false   0
+    urlshortener-api-67b975d769-zwlhj   false   0
+  readiness endpoint from inside a pod:
+    wget: server returned error: HTTP/1.1 503 Service Unavailable
+    command terminated with exit code 1
+  service endpoints (empty = Traefik has nowhere to send /api):
+    urlshortener-api-67b975d769-m46lb ready=false
+    urlshortener-api-67b975d769-zwlhj ready=false
+    urlshortener-api-67b975d769-6wp27 ready=false
+    urlshortener-api-67b975d769-bcvwq ready=false
+    urlshortener-api-67b975d769-76f78 ready=false
+  metric urlshortener_mongo_up per pod:
+    {'pod': 'urlshortener-api-67b975d769-m46lb'} 0
+    {'pod': 'urlshortener-api-67b975d769-6wp27'} 0
+    {'pod': 'urlshortener-api-67b975d769-zwlhj'} 0
+    {'pod': 'urlshortener-api-67b975d769-bcvwq'} 0
+    {'pod': 'urlshortener-api-67b975d769-76f78'} 0
+  API log lines:
+Found 5 pods, using pod/urlshortener-api-67b975d769-m46lb
+    {"level":"warn","time":"2026-10-18T12:59:26.999Z","service":"urlshortener-api","version":"cf27a7d","msg":"MongoDB disconnected"}
+
+## 18:30:07 waiting 200s so the alerts pass their 'for' duration...
+  firing/pending app alerts:
+    {'alertname': 'UrlShortenerPodRestarting', 'alertstate': 'firing', 'pod': 'urlshortener-api-5f45546fc7-jp266', 'severity': 'warning'} 1
+    {'alertname': 'UrlShortenerMongoUnavailable', 'alertstate': 'firing', 'severity': 'critical'} 1
+    {'alertname': 'UrlShortenerErrorBudgetFastBurn', 'alertstate': 'firing', 'severity': 'critical'} 1
+  edge (Traefik) 5xx ratio over 5m: 0.7157644036940424
+
+## 18:33:27 ACTION (runbook: MongoDB unavailable -> restore the database)
+statefulset.apps/urlshortener-mongodb scaled
+Waiting for statefulset spec update to be observed...
+Waiting for 1 pods to be ready...
+Waiting for 1 pods to be ready...
+partitioned roll out complete: 1 new pods have been updated...
+  users served again 12s after the database was started (no API restart needed)
+
+## 18:33:39 VERIFY
+    POD                                 READY   RESTARTS
+    urlshortener-api-67b975d769-76f78   false   0
+    urlshortener-api-67b975d769-m46lb   true    0
+  Smoke test against http://localhost:8080
+    PASS API version cf27a7d (commit cf27a7de2317f18d5099b6daf67e67a1e26bf655)
+    PASS web frontend served
+    PASS signup (201)
+    PASS login returned a token
+    PASS created short url 3J1k01E
+    PASS short url listed for its owner
+    PASS GET /r/3J1k01E -> 302 https://example.com/smoke/12826
+    PASS deleted; link now 404
+  Smoke test passed
+user traffic during the experiment: 1259 requests, 179 OK, 1080 failed
+  HTTP 200 x 179
+  HTTP 503 x 1080
+  first failure: 18:29:36 503   last failure: 18:33:39 503
+  alerts 30s after recovery (resolve once their windows clear):
+    {'alertname': 'UrlShortenerPodRestarting', 'alertstate': 'firing', 'pod': 'urlshortener-api-5f45546fc7-jp266', 'severity': 'warning'} 1
+    {'alertname': 'UrlShortenerErrorBudgetFastBurn', 'alertstate': 'firing', 'severity': 'critical'} 1
