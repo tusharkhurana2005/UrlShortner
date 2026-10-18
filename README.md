@@ -4,7 +4,8 @@ A personal MERN URL shortener (React + Express + MongoDB), taken from "runs on
 my machine" to a system that is built, tested, scanned, deployed, observed and
 recovered with the practices from the Advanced DevOps course.
 
-- **Baseline:** [`12b426b`](https://github.com/TUSHAR1651/UrlShortner/tree/12b426b911f0fcad54f184c44ed0040f42bc9d2b), described in [docs/BASELINE.md](docs/BASELINE.md)
+- **Repository:** https://github.com/tusharkhurana2005/UrlShortner (fork of [TUSHAR1651/UrlShortner](https://github.com/TUSHAR1651/UrlShortner), with identical history up to the baseline)
+- **Baseline:** [`12b426b`](https://github.com/tusharkhurana2005/UrlShortner/tree/12b426b911f0fcad54f184c44ed0040f42bc9d2b), described in [docs/BASELINE.md](docs/BASELINE.md)
 - **All changes:** one PR from `devops/production-readiness`
 - **Environment:** local Kubernetes (kind). No cloud account or paid service is needed.
 
@@ -50,7 +51,7 @@ recovered with the practices from the Advanced DevOps course.
 ### From zero to a verified deployment
 
 ```bash
-git clone https://github.com/TUSHAR1651/UrlShortner.git && cd UrlShortner
+git clone https://github.com/tusharkhurana2005/UrlShortner.git && cd UrlShortner
 git checkout devops/production-readiness
 
 make up        # = cluster + secrets + platform + build + deploy + smoke (~10 min the first time)

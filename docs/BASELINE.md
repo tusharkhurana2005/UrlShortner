@@ -5,8 +5,8 @@
 | Student | Tushar Khurana |
 | Student identifier | `<fill in>` |
 | Project | URL Shortener: Advanced DevOps project |
-| Repository | https://github.com/TUSHAR1651/UrlShortner |
-| Baseline commit | [`12b426b911f0fcad54f184c44ed0040f42bc9d2b`](https://github.com/TUSHAR1651/UrlShortner/tree/12b426b911f0fcad54f184c44ed0040f42bc9d2b) ("new commit", 3 Nov 2024) |
+| Repository | https://github.com/tusharkhurana2005/UrlShortner (a fork of the original https://github.com/TUSHAR1651/UrlShortner; the history up to and including the baseline is identical in both) |
+| Baseline commit | [`12b426b911f0fcad54f184c44ed0040f42bc9d2b`](https://github.com/tusharkhurana2005/UrlShortner/commit/12b426b911f0fcad54f184c44ed0040f42bc9d2b) ("new commit", 3 Nov 2024) |
 
 The baseline commit is the tip of `main` before any work for this project. It
 is preserved unchanged in the history; every improvement is on the

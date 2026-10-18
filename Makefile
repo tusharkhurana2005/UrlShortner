@@ -1,7 +1,7 @@
 # One entry point for the whole lifecycle. `make help` lists targets.
 SHELL := /bin/bash
 TAG ?= $(shell cat .last-built-tag 2>/dev/null)
-REGISTRY ?= ghcr.io/tushar1651
+REGISTRY ?= ghcr.io/tusharkhurana2005
 
 .PHONY: help up cluster secrets platform build deploy deploy-release smoke test lint scan \
         rollback drift backup restore verify evidence grafana prometheus status down

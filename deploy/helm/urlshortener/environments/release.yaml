@@ -2,5 +2,5 @@
 # locally built ones (make deploy-release TAG=<sha>). Override the registry
 # with REGISTRY=ghcr.io/<owner>; add pullSecrets if the packages are private.
 image:
-  registry: ghcr.io/tushar1651
+  registry: ghcr.io/tusharkhurana2005
   pullPolicy: IfNotPresent

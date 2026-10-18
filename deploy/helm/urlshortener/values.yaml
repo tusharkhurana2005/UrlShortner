@@ -108,4 +108,4 @@ monitoring:
   slo:
     availabilityTarget: 0.995
     latencyThresholdSeconds: 0.5
-  runbookBaseUrl: https://github.com/TUSHAR1651/UrlShortner/blob/main/docs/RUNBOOK.md
+  runbookBaseUrl: https://github.com/tusharkhurana2005/UrlShortner/blob/main/docs/RUNBOOK.md
