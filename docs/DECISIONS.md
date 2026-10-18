@@ -61,7 +61,7 @@ serving for 12s** with `Connection: close` (a container restart, unlike a pod
 deletion, leaves the pod in the Service until readiness fails), then closes
 idle connections, finishes in-flight requests, closes Mongo and flushes
 traces (`server/index.js`).
-Evidence 05 and 07: 0 failed requests across rollouts and drains.
+Evidence 07 (node drain) and 11 (container restart): 0 failed requests.
 
 ## 4. Resources and scaling
 
@@ -160,8 +160,9 @@ readiness, plus Helm `--rollback-on-failure`.
 
 **Why:** a stateless API behind a load balancer, one cluster, low traffic.
 Rolling with readiness gives zero-downtime deploys and automatic protection
-against releases that crash or fail probes (evidence 05: no user request failed
-while a broken release was attempted and rolled back).
+against releases that crash or fail probes (evidence 05: no error responses
+while a broken release was attempted and rolled back; a few requests hit the
+client's 2s timeout during a CPU spike on the laptop, analysed in the file).
 
 **Recovering from a bad release that is healthy but wrong** (passes probes
 but has a logic bug): `make rollback` (`helm rollback` to the previous

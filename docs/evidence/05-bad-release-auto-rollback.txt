@@ -1,0 +1,65 @@
+# Bad release is rolled back automatically (scripts/demos/bad-release.sh)
+# commit 1a11338f5d02da1734286310802267a05152a30b, generated 2026-10-18T13:37:38Z
+
+## Before: version 1a11338 serving
+{"version":"1a11338","commit":"1a11338f5d02da1734286310802267a05152a30b","buildTime":"2026-10-18T13:36:22Z"}
+
+## Release 1a11338 again with a bad setting (LOG_LEVEL=verbose is not a valid pino level, the process exits at startup)
+
+## While the bad release is rolling out: delete old pod urlshortener-api-8599c57f96-8blxd
+pod "urlshortener-api-8599c57f96-8blxd" deleted from urlshortener namespace
+  pods of the serving ReplicaSet (8599c57f96) during the bad release:
+    POD                                 RS-HASH      READY   RESTARTS   LOG_LEVEL
+    urlshortener-api-6795947684-8bdw9   6795947684   false   2          verbose
+    urlshortener-api-6795947684-mhnsp   6795947684   false   2          verbose
+    urlshortener-api-8599c57f96-8blxd   8599c57f96   true    0          info
+    urlshortener-api-8599c57f96-8j8p9   8599c57f96   true    0          info
+    urlshortener-api-8599c57f96-cl7rr   8599c57f96   true    0          info
+    urlshortener-api-8599c57f96-gtzjw   8599c57f96   true    0          info
+==> Deploying urlshortener tag=1a11338 env=local ns=urlshortener
+level=WARN msg="upgrade failed" name=urlshortener error="resource Deployment/urlshortener/urlshortener-api not ready. status: InProgress, message: Updated: 2/4\ncontext deadline exceeded"
+Error: UPGRADE FAILED: release urlshortener failed, and has been rolled back due to rollback-on-failure being set: resource Deployment/urlshortener/urlshortener-api not ready. status: InProgress, message: Updated: 2/4
+deploy.sh exit code: 1 (non-zero = release rejected)
+
+## What Kubernetes saw: new pods crashed, old pods never stopped serving
+56s         Warning   Unhealthy                      pod/urlshortener-api-8599c57f96-8blxd      Readiness probe failed: Get "http://10.244.3.109:8000/readyz": dial tcp 10.244.3.109:8000: connect: connection refused
+49s         Warning   Unhealthy                      pod/urlshortener-api-6795947684-mhnsp      Startup probe failed: Get "http://10.244.3.115:8000/healthz": dial tcp 10.244.3.115:8000: connect: connection refused
+47s         Warning   BackOff                        pod/urlshortener-api-6795947684-mhnsp      Back-off restarting failed container api in pod urlshortener-api-6795947684-mhnsp_urlshortener(72d485f6-17d5-40c9-8a7d-9686fe4bdab7)
+21s         Normal    ScalingReplicaSet              deployment/urlshortener-api                Scaled down replica set urlshortener-api-6795947684 from 2 to 1
+21s         Normal    ScalingReplicaSet              deployment/urlshortener-api                Scaled up replica set urlshortener-api-8599c57f96 from 3 to 4
+17s         Normal    ScalingReplicaSet              deployment/urlshortener-api                (combined from similar events): Scaled down replica set urlshortener-api-6795947684 from 1 to 0
+
+## Crash reason, from Loki (the failed pods are already gone, their logs are not)
+   urlshortener-api-6795947684-8bdw9 | Error: default level:verbose must be included in custom levels
+   urlshortener-api-6795947684-mhnsp | Error: default level:verbose must be included in custom levels
+
+## Helm history: the failed revision and the automatic rollback
+REVISION	UPDATED                 	STATUS    	CHART             	APP VERSION	DESCRIPTION                                                                                                                          
+32      	Sun Oct 18 19:07:16 2026	superseded	urlshortener-1.0.0	1a11338    	image=1a11338 chart=1a11338 env=local by=tusharkhurana: ops(evidence): container-restart drain demo as evidence step                 
+33      	Sun Oct 18 19:07:38 2026	failed    	urlshortener-1.0.0	1a11338    	Upgrade "urlshortener" failed: resource Deployment/urlshortener/urlshortener-api not ready. status: InProgress, message: Updated: ...
+34      	Sun Oct 18 19:08:54 2026	deployed  	urlshortener-1.0.0	1a11338    	Rollback to 32                                                                                                                       
+user traffic during the experiment: 361 requests, 354 OK, 7 failed
+  HTTP 000 x 7
+  HTTP 200 x 354
+  first failure: 19:09:02 000   last failure: 19:09:16 000
+
+## After
+{"version":"1a11338","commit":"1a11338f5d02da1734286310802267a05152a30b","buildTime":"2026-10-18T13:36:22Z"}
+NAME                                READY   STATUS    RESTARTS   AGE
+urlshortener-api-8599c57f96-8j8p9   1/1     Running   0          76s
+urlshortener-api-8599c57f96-cl7rr   0/1     Running   0          91s
+urlshortener-api-8599c57f96-f58gb   1/1     Running   0          23s
+urlshortener-api-8599c57f96-gtzjw   1/1     Running   0          2m29s
+
+## Analysis of the 7 failed requests (appended after the run, from Loki)
+The 7 failures are HTTP 000: the traffic generator's 2-second client timeout,
+not error responses. Traefik's access logs for 13:38:50-13:39:25 UTC (from Loki;
+the node's own log files had already rotated after the load test) show
+62 x 200 and 6 x 499 (client closed), and no 5xx. The slow responses (1-5s) came
+from four different API pods, and one request spent only 0.21s inside Traefik,
+so the delay was mostly before the ingress. That is a CPU spike across the
+laptop's Docker VM while two crash-looping bad-release pods and a replacement
+pod were starting, not a fault in the release path. The old version never
+stopped serving and the rollback completed. Earlier runs of this demo had 0
+failures; on a real cluster, CPU requests sized for startup and a retry
+policy for idempotent GETs at the ingress would absorb it.

@@ -1,0 +1,50 @@
+# Metrics, logs, traces and their correlation (scripts/verify-observability.sh)
+# commit 1a11338f5d02da1734286310802267a05152a30b, generated 2026-10-18T13:37:25Z
+
+## Metrics (Prometheus)
+  scrape targets:
+    traefik                      traefik-b7cfbcb4d-fs6l5                up
+    traefik                      traefik-b7cfbcb4d-9lmmh                up
+    urlshortener-api             urlshortener-api-8599c57f96-8blxd      up
+    urlshortener-api             urlshortener-api-8599c57f96-gtzjw      up
+    urlshortener-mongodb         urlshortener-mongodb-0                 up
+  SLIs (recording rules, measured at the ingress):
+    urlshortener:request_rate:rate5m     0.010526315789473682
+    urlshortener:error_ratio:rate5m      0
+    urlshortener:error_ratio:rate1h      0.011185964801502501
+    urlshortener:latency_p95:rate5m      0.09500000000000001
+  serving version (urlshortener_build_info):
+     {'commit': '1a11338f5d02da1734286310802267a05152a30b', 'version': '1a11338'}
+  alert rules:
+    UrlShortenerErrorBudgetFastBurn        critical  state=inactive
+    UrlShortenerErrorBudgetSlowBurn        warning   state=inactive
+    UrlShortenerHighLatency                warning   state=inactive
+    UrlShortenerApiDown                    critical  state=inactive
+    UrlShortenerMongoUnavailable           critical  state=inactive
+    UrlShortenerPodRestarting              warning   state=inactive
+    UrlShortenerMultipleVersionsServing    warning   state=inactive
+    UrlShortenerBackupStale                warning   state=inactive
+  Alertmanager currently has 0 UrlShortener alert(s)
+
+## One request, followed through logs and traces
+  sent GET /r/doesnotexist with X-Request-Id: evidence-1792330648; waiting for log shipping...
+  Loki log line (labels: namespace, pod, component, level):
+    {"level": "warn", "time": "2026-10-18T13:37:28.868Z", "msg": "request completed", "trace_id": "78a2dd00bcffa91df9b87adcce85cdc5", "span_id": "cc025823ab088842", "req.id": "evidence-1792330648", "url": "/r/doesnotexist", "status": 404, "responseTime_ms": 24}
+  Tempo trace 78a2dd00bcffa91df9b87adcce85cdc5:
+    traefik            GET                                          54.26 ms
+    traefik            ReverseProxy                                 31.98 ms
+    urlshortener-api   GET /r/:id                                   26.41 ms
+    urlshortener-api   middleware - httpMetricsMiddleware            0.10 ms
+    urlshortener-api   middleware - result                           0.80 ms
+    urlshortener-api   middleware - <anonymous>                      0.03 ms
+    urlshortener-api   middleware - corsMiddleware                   0.10 ms
+    urlshortener-api   middleware - helmetMiddleware                 0.15 ms
+    urlshortener-api   middleware - jsonParser                       0.06 ms
+    urlshortener-api   request handler - /r/:id                     24.32 ms
+    urlshortener-api   find urls                                    17.08 ms
+
+## Grafana
+  datasource prometheus  health: OK
+  datasource loki        health: OK
+  datasource tempo       health: OK
+  dashboard: URL Shortener — Service Overview -> /d/urlshortener-overview/url-shortener-e28094-service-overview

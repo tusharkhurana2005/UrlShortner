@@ -107,8 +107,8 @@ flowchart LR
 
 | Failure | What users see | Why / mitigation | Evidence |
 |---|---|---|---|
-| One API pod crashes or hangs | Nothing | 2+ replicas; liveness restarts it; readiness removes it from endpoints | 05 (crash-looping pod never served) |
-| Bad release (crash or failed probes) | Nothing | `maxUnavailable 0` + readiness: old pods keep serving; Helm rolls back | 05 |
+| One API pod crashes or hangs | Nothing | 2+ replicas; liveness restarts it; readiness removes it from endpoints; on restart the app drains before closing | 05 (crash-looping pod never served), 11 |
+| Bad release (crash or failed probes) | No error responses | `maxUnavailable 0` + readiness: old pods keep serving; Helm rolls back | 05 |
 | MongoDB down | `/api` and `/r` return 503; static UI still loads | API readiness depends on Mongo, so pods leave rotation; liveness does not, so no restart storm; reconnect is automatic | 06 |
 | Node drain (planned) | Nothing | PDBs (api/web/traefik), topology spread, preStop and graceful drain | 07 |
 | Node failure (unplanned) | Short blip for stateless parts; **outage if it is the Mongo node** | Mongo is a single replica on node-local storage, the main single point of failure (see DECISIONS.md) | — |

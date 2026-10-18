@@ -1,0 +1,42 @@
+# Node maintenance with PDBs and topology spread (scripts/demos/node-drain.sh)
+# commit 1a11338f5d02da1734286310802267a05152a30b, generated 2026-10-18T13:39:19Z
+
+## Before: replicas on both workers
+    urlshortener-api-8599c57f96-8j8p9   urlshortener-worker2   true
+    urlshortener-api-8599c57f96-cl7rr   urlshortener-worker    false
+    urlshortener-api-8599c57f96-f58gb   urlshortener-worker2   true
+    urlshortener-api-8599c57f96-gtzjw   urlshortener-worker2   true
+    urlshortener-web-567c5c46fd-rms9t   urlshortener-worker    true
+    urlshortener-web-567c5c46fd-tl4zb   urlshortener-worker2   true
+    traefik-b7cfbcb4d-9lmmh   urlshortener-worker   true
+    traefik-b7cfbcb4d-fs6l5   urlshortener-worker   true
+  PDBs:
+    platform/traefik minAvailable=N/A maxUnavailable=1 allowed=1
+    urlshortener/urlshortener-api minAvailable=1 maxUnavailable=N/A allowed=2
+    urlshortener/urlshortener-web minAvailable=1 maxUnavailable=N/A allowed=1
+
+## kubectl drain urlshortener-worker2
+    evicting pod urlshortener/urlshortener-web-567c5c46fd-tl4zb
+    evicting pod urlshortener/urlshortener-api-8599c57f96-8j8p9
+    evicting pod urlshortener/urlshortener-api-8599c57f96-f58gb
+    evicting pod urlshortener/urlshortener-api-8599c57f96-gtzjw
+    node/urlshortener-worker2 drained
+
+## During maintenance: everything user-facing runs on the remaining worker
+    urlshortener-api-8599c57f96-7nwkt   urlshortener-worker   true
+    urlshortener-api-8599c57f96-cl7rr   urlshortener-worker   true
+    urlshortener-api-8599c57f96-hmvfz   urlshortener-worker   true
+    urlshortener-api-8599c57f96-slkbg   urlshortener-worker   true
+    urlshortener-web-567c5c46fd-rms9t   urlshortener-worker   true
+    urlshortener-web-567c5c46fd-s6fnc   urlshortener-worker   true
+    traefik-b7cfbcb4d-9lmmh   urlshortener-worker   true
+    traefik-b7cfbcb4d-fs6l5   urlshortener-worker   true
+
+## Maintenance done: kubectl uncordon urlshortener-worker2
+node/urlshortener-worker2 uncordoned
+user traffic during the experiment: 175 requests, 175 OK, 0 failed
+  HTTP 200 x 175
+
+Note: pods with node-local volumes (here Prometheus/Alertmanager/Tempo on
+urlshortener-worker2) wait for the node to return: local-path volumes cannot move.
+MongoDB is never drained in this demo for the same reason (see docs).

@@ -1,0 +1,68 @@
+# Build, deploy and end-to-end smoke test
+# commit 1a11338f5d02da1734286310802267a05152a30b, generated 2026-10-18T13:36:22Z
+
+$ make build && make deploy   (image tag 1a11338)
+==> Deploying urlshortener tag=1a11338 env=local ns=urlshortener
+Release "urlshortener" has been upgraded. Happy Helming!
+NAME: urlshortener
+LAST DEPLOYED: Sun Oct 18 19:06:46 2026
+NAMESPACE: urlshortener
+STATUS: deployed
+REVISION: 31
+DESCRIPTION: image=1a11338 chart=1a11338 env=local by=tusharkhurana: ops(evidence): container-restart drain demo as evidence step
+NOTES:
+URL Shortener 1a11338 deployed to namespace urlshortener.
+  App:      http://localhost:8080
+  Version:  curl -s http://localhost:8080/api/version
+  Smoke:    helm test urlshortener -n urlshortener
+  History:  helm history urlshortener -n urlshortener
+  Rollback: helm rollback urlshortener <REVISION> -n urlshortener --wait
+==> Rollout complete; running in-cluster smoke test (helm test)
+NAME: urlshortener
+LAST DEPLOYED: Sun Oct 18 19:06:46 2026
+NAMESPACE: urlshortener
+STATUS: deployed
+REVISION: 31
+DESCRIPTION: image=1a11338 chart=1a11338 env=local by=tusharkhurana: ops(evidence): container-restart drain demo as evidence step
+TEST SUITE:     urlshortener-smoke-test
+Last Started:   Sun Oct 18 19:06:55 2026
+Last Completed: Sun Oct 18 19:06:58 2026
+Phase:          Succeeded
+REVISION	UPDATED                 	STATUS    	CHART             	APP VERSION	DESCRIPTION                                                                                                                          
+27      	Sun Oct 18 18:27:43 2026	superseded	urlshortener-1.0.0	cf27a7d    	image=cf27a7d chart=cf27a7d env=local by=tusharkhurana: ops(evidence): show scheduled backup runs; print the web aud                 
+28      	Sun Oct 18 18:28:06 2026	failed    	urlshortener-1.0.0	cf27a7d    	Upgrade "urlshortener" failed: resource Deployment/urlshortener/urlshortener-api not ready. status: InProgress, message: Updated: ...
+29      	Sun Oct 18 18:29:22 2026	superseded	urlshortener-1.0.0	cf27a7d    	Rollback to 27                                                                                                                       
+30      	Sun Oct 18 18:47:46 2026	superseded	urlshortener-1.0.0	ffab333    	image=ffab333 chart=ffab333 env=local by=tusharkhurana: fix: a busy pod must not be killed, and a restarting pod mus                 
+31      	Sun Oct 18 19:06:46 2026	deployed  	urlshortener-1.0.0	1a11338    	image=1a11338 chart=1a11338 env=local by=tusharkhurana: ops(evidence): container-restart drain demo as evidence step                 
+KIND          NAME                   READY   VERSION
+Deployment    urlshortener-api       2       1a11338
+Deployment    urlshortener-web       2       1a11338
+StatefulSet   urlshortener-mongodb   1       1a11338
+
+$ make smoke
+Smoke test against http://localhost:8080
+  PASS API version 1a11338 (commit 1a11338f5d02da1734286310802267a05152a30b)
+  PASS web frontend served
+  PASS signup (201)
+  PASS login returned a token
+  PASS created short url 3TWe1uu
+  PASS short url listed for its owner
+  PASS GET /r/3TWe1uu -> 302 https://example.com/smoke/16932
+  PASS deleted; link now 404
+Smoke test passed
+
+$ curl -s http://localhost:8080/api/version
+{"version":"1a11338","commit":"1a11338f5d02da1734286310802267a05152a30b","buildTime":"2026-10-18T13:36:22Z"}
+$ curl -s http://localhost:8080/version.json   (web build)
+{"version":"1a11338","commit":"1a11338f5d02da1734286310802267a05152a30b","buildTime":"2026-10-18T13:36:22Z"}
+
+$ docker image inspect urlshortener-api:1a11338 --format '{{json .Config.Labels}}'
+{"org.opencontainers.image.created":"2026-10-18T13:36:22Z","org.opencontainers.image.revision":"1a11338f5d02da1734286310802267a05152a30b","org.opencontainers.image.source":"https://github.com/tusharkhurana2005/UrlShortner","org.opencontainers.image.title":"urlshortener-api","org.opencontainers.image.version":"1a11338"}
+
+$ kubectl get deploy,sts -l app.kubernetes.io/instance=urlshortener (version label = image tag)
+NAME                               READY   UP-TO-DATE   AVAILABLE   AGE   VERSION
+deployment.apps/urlshortener-api   2/2     2            2           17h   1a11338
+deployment.apps/urlshortener-web   2/2     2            2           17h   1a11338
+
+NAME                                    READY   AGE   VERSION
+statefulset.apps/urlshortener-mongodb   1/1     17h   1a11338

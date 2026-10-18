@@ -1,0 +1,29 @@
+# Drift detection and remediation (scripts/demos/drift.sh)
+# commit 1a11338f5d02da1734286310802267a05152a30b, generated 2026-10-18T13:37:14Z
+
+## 1. Cluster matches the release
+==> No drift: cluster matches the deployed release
+
+## 2. Manual changes outside the pipeline ('quick fix' during debugging)
+$ kubectl -n urlshortener scale deploy urlshortener-web --replicas=1
+deployment.apps/urlshortener-web scaled
+$ kubectl -n urlshortener delete networkpolicy urlshortener-api
+networkpolicy.networking.k8s.io "urlshortener-api" deleted from urlshortener namespace
+
+## 3. Detection (the same check runs in CI after every deploy)
+diff -u -N LIVE/apps.v1.Deployment.urlshortener.urlshortener-web MERGED/apps.v1.Deployment.urlshortener.urlshortener-web
+-  replicas: 1
++  replicas: 2
+diff -u -N LIVE/networking.k8s.io.v1.NetworkPolicy.urlshortener.urlshortener-api MERGED/networking.k8s.io.v1.NetworkPolicy.urlshortener.urlshortener-api
++  name: urlshortener-api
+DRIFT DETECTED: fix it by redeploying (scripts/deploy.sh) or by committing the change.
+
+## 4. Remediation: redeploy the version that is already released (1a11338)
+STATUS: deployed
+DESCRIPTION: image=1a11338 chart=1a11338 env=local by=tusharkhurana: ops(evidence): container-restart drain demo as evidence step
+STATUS: deployed
+  web replicas: 2
+  restored: networkpolicy.networking.k8s.io/urlshortener-api
+
+## 5. Verify
+==> No drift: cluster matches the deployed release

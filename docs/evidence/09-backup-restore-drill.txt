@@ -1,0 +1,27 @@
+# Backup and restore drill (scripts/demos/backup-restore.sh)
+# commit 1a11338f5d02da1734286310802267a05152a30b, generated 2026-10-18T13:48:05Z
+
+## 0. The nightly backup runs on its own schedule
+  schedule: 0 2 * * * (UTC)   last scheduled: 2026-10-18T02:00:00Z   last success: 2026-10-18T13:12:00Z
+  JOB                                  STATUS               STARTED
+urlshortener-mongodb-backup-29871480   SuccessCriteriaMet   2026-10-18T08:56:44Z
+
+## 1. Data exists: short link AmQDuaq
+  GET /r/AmQDuaq -> 302 https://kubernetes.io/docs/
+
+## 2. Backup (a Job created from the nightly CronJob)
+  2026-10-18T13:48:08.208+0000	done dumping `Urls.urls` (15 documents)
+  2026-10-18T13:48:08.208+0000	done dumping `Urls.users` (83 documents)
+  backup written: /backup/urls-20261018T134808Z.archive.gz
+
+## 3. Disaster: the urls collection is dropped
+  GET /r/AmQDuaq -> 404  (link is gone)
+
+## 4. Restore the newest archive (scripts/restore-backup.sh)
+  ==> Restoring latest into urlshortener-mongodb-0.urlshortener-mongodb.urlshortener.svc.cluster.local (job mongodb-restore-1792331292)
+  2026-10-18T13:48:13.829+0000	restoring indexes for collection `Urls.users` from metadata
+  2026-10-18T13:48:13.880+0000	98 document(s) restored successfully. 0 document(s) failed to restore.
+  ==> Restore finished
+
+## 5. Verify
+  GET /r/AmQDuaq -> 302 https://kubernetes.io/docs/

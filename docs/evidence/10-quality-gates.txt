@@ -1,0 +1,35 @@
+# Local run of the CI quality gates
+# commit 1a11338f5d02da1734286310802267a05152a30b, generated 2026-10-18T13:48:16Z
+
+## API: lint + tests + audit
+eslint: clean
+All files           |   92.73 |     78.3 |   85.18 |   93.01 |                   
+Tests:       16 passed, 16 total
+found 0 vulnerabilities
+
+## Web: tests + build + audit
+Tests:       1 passed, 1 total
+Compiled successfully.
+npm audit (shipped deps): 2 moderate severity vulnerabilities -> high/critical gate PASSED
+
+## Helm lint (every environment) + kubeconform
+ci.yaml: 1 chart(s) linted, 0 chart(s) failed
+local.yaml: 1 chart(s) linted, 0 chart(s) failed
+release.yaml: 1 chart(s) linted, 0 chart(s) failed
+ci.yaml: Summary: 21 resources found parsing stdin - Valid: 21, Invalid: 0, Errors: 0, Skipped: 0
+local.yaml: Summary: 27 resources found parsing stdin - Valid: 27, Invalid: 0, Errors: 0, Skipped: 0
+release.yaml: Summary: 27 resources found parsing stdin - Valid: 27, Invalid: 0, Errors: 0, Skipped: 0
+
+## hadolint
+hadolint: clean
+
+## Trivy image scan (fixable HIGH/CRITICAL fails the build)
+urlshortener-api:1a11338  fixable HIGH/CRITICAL: 0
+urlshortener-web:1a11338  fixable HIGH/CRITICAL: 0
+
+## Trivy config scan (chart, Dockerfiles, platform values)
+trivy config: 0 HIGH/CRITICAL misconfigurations
+
+## gitleaks (full git history)
+7:23PM INF scanned ~280131374 bytes (280.13 MB) in 2.6s
+7:23PM INF no leaks found
