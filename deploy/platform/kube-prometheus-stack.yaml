@@ -77,11 +77,14 @@ grafana:
       check_for_plugin_updates: false
     plugins:
       preinstall_disabled: true
+  # CPU capped: Grafana once spun at 16 cores rendering the dashboard on the
+  # node that also runs the API. Tooling must never starve the workload.
   resources:
     requests:
       cpu: 50m
       memory: 192Mi
     limits:
+      cpu: "1"
       memory: 512Mi
   sidecar:
     dashboards:

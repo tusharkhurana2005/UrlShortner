@@ -11,7 +11,7 @@ case "$cmd" in
     : > "$logf"
     (
       while true; do
-        code=$(curl -s -o /dev/null -m 2 -w '%{http_code}' "${APP_URL}/api/version" || echo 000)
+        code=$(curl -s -o /dev/null -m 2 -w '%{http_code}' "${APP_URL}/api/version" || true)
         echo "$(date +%H:%M:%S) ${code}" >> "$logf"
         sleep 0.2
       done

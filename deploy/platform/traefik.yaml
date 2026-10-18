@@ -1,6 +1,22 @@
 # Ingress controller. The only entry point into the cluster from the host.
+# Two replicas on different nodes + a PDB: every user request passes through
+# here, so a single replica would make any node drain an outage.
 deployment:
-  replicas: 1
+  replicas: 2
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+    # Ignore the tainted control-plane node, and during a rolling update only
+    # count pods of the new ReplicaSet.
+    nodeTaintsPolicy: Honor
+    matchLabelKeys: ["pod-template-hash"]
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: traefik
 ingressClass:
   enabled: true
   isDefaultClass: true
@@ -16,6 +32,13 @@ providers:
 ports:
   web:
     nodePort: 30080
+    # On SIGTERM keep accepting for 5s while kube-proxy removes this pod from
+    # the endpoints, then give in-flight requests up to 10s. Without this a
+    # Traefik rollout or node drain drops the requests in flight.
+    transport:
+      lifeCycle:
+        requestAcceptGraceTimeout: 5s
+        graceTimeOut: 10s
   websecure:
     expose:
       default: false

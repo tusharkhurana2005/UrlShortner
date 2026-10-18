@@ -6,6 +6,9 @@
 # --rollback-on-failure: if any new pod fails its probes within the timeout,
 # Helm restores the previous release automatically, so a broken build never
 # replaces a working one.
+# --force-conflicts: Helm 4 uses server-side apply. If someone changed a field
+# by hand (kubectl scale/edit), that manager now owns the field and the apply
+# would be refused. The reviewed release is the source of truth, so it wins.
 source "$(dirname "$0")/lib.sh"
 require helm kubectl
 
@@ -44,6 +47,7 @@ helm upgrade --install "${RELEASE}" "${CHART_PKG}" \
   --set image.tag="${TAG}" \
   ${EXTRA_HELM_ARGS:-} \
   --rollback-on-failure \
+  --force-conflicts \
   --wait=watcher \
   --timeout "${TIMEOUT}" \
   --history-max 10 \

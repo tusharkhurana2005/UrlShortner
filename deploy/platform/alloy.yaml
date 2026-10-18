@@ -5,12 +5,16 @@ controller:
   type: deployment
   replicas: 1
 alloy:
+  # CPU is capped on purpose: in the load test (82k requests) Alloy spent ~10
+  # cores catching up on the log backlog on the same node as the API. A log
+  # shipper should fall behind, not compete with the application.
   resources:
     requests:
-      cpu: 20m
-      memory: 64Mi
+      cpu: 50m
+      memory: 96Mi
     limits:
-      memory: 256Mi
+      cpu: "1"
+      memory: 384Mi
   configMap:
     content: |
       discovery.kubernetes "pods" {
