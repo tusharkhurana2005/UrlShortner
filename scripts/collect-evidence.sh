@@ -35,7 +35,9 @@ quality_gates() {
   echo "## API: lint + tests + audit"
   (cd "${ROOT_DIR}/server" && npm ci --ignore-scripts --silent && npx eslint . && echo "eslint: clean" && npx jest --runInBand --coverage 2>&1 | grep -E "Tests:|All files" && npm audit --omit=dev --audit-level=high | tail -1)
   echo; echo "## Web: tests + build + audit"
-  (cd "${ROOT_DIR}/client" && npm ci --ignore-scripts --silent && CI=true npx react-scripts test --watchAll=false 2>&1 | grep -E "Tests:" && CI=true npm run build --silent 2>&1 | grep -E "Compiled|Failed" ; npm audit --omit=dev --audit-level=high | tail -2)
+  (cd "${ROOT_DIR}/client" && npm ci --ignore-scripts --silent && CI=true npx react-scripts test --watchAll=false 2>&1 | grep -E "Tests:" && CI=true npm run build --silent 2>&1 | grep -E "Compiled|Failed"
+   out="$(npm audit --omit=dev --audit-level=high 2>&1)"; rc=$?
+   echo "npm audit (shipped deps): $(echo "$out" | grep -E "vulnerabilit" | tail -1 || echo "found 0 vulnerabilities") -> high/critical gate $([ $rc -eq 0 ] && echo PASSED || echo FAILED)")
   echo; echo "## Helm lint (every environment) + kubeconform"
   for env in "${CHART_DIR}"/environments/*.yaml; do helm lint "${CHART_DIR}" --strict -f "$env" --set image.tag=x | tail -1 | sed "s#^#$(basename "$env"): #"; done
   for env in "${CHART_DIR}"/environments/*.yaml; do

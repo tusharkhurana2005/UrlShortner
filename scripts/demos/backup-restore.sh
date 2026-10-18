@@ -9,7 +9,13 @@ json() { python3 -c "import json,sys; print(eval('json.load(sys.stdin)' + sys.ar
 curl -s -o /dev/null -H 'Content-Type: application/json' -d "{\"name\":\"Drill\",\"email\":\"$E\",\"password\":\"drill-password-1\"}" "$B/api/user/signup"
 T="$(curl -s -H 'Content-Type: application/json' -d "{\"email\":\"$E\",\"password\":\"drill-password-1\"}" "$B/api/user/login" | json "['token']")"
 ID="$(curl -s -H 'Content-Type: application/json' -H "Authorization: Bearer $T" -d '{"Url":"https://kubernetes.io/docs/"}' "$B/api/url/create" | json "['Url']['shortUrl']")"
-echo "## 1. Data exists: short link ${ID}"
+echo "## 0. The nightly backup runs on its own schedule"
+kubectl -n "${NAMESPACE}" get cronjob "${RELEASE}-mongodb-backup" \
+  -o jsonpath='  schedule: {.spec.schedule} (UTC)   last scheduled: {.status.lastScheduleTime}   last success: {.status.lastSuccessfulTime}{"\n"}'
+kubectl -n "${NAMESPACE}" get jobs -o custom-columns='  JOB:.metadata.name,STATUS:.status.conditions[0].type,STARTED:.status.startTime' \
+  | grep -E "JOB|${RELEASE}-mongodb-backup-[0-9]+ " || true
+
+echo; echo "## 1. Data exists: short link ${ID}"
 curl -s -o /dev/null -w "  GET /r/${ID} -> %{http_code} %{redirect_url}\n" "$B/r/${ID}"
 
 echo; echo "## 2. Backup (a Job created from the nightly CronJob)"
