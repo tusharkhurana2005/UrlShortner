@@ -26,23 +26,32 @@ const server = app.listen(config.port, () => {
 });
 connectWithRetry();
 
-// Graceful shutdown on SIGTERM (sent by Kubernetes during rollouts/evictions):
-// fail readiness, finish in-flight requests, close Mongo, flush traces, exit.
+// Graceful shutdown on SIGTERM (rollouts, evictions, liveness restarts):
+// 1. fail readiness and keep serving for drainSeconds. When only the container
+//    restarts, the pod is NOT removed from the Service until readiness fails,
+//    and the proxy keeps reusing its keep-alive connections; closing the
+//    listener immediately turned those requests into 502s.
+// 2. stop accepting, close idle keep-alive connections, finish in-flight
+//    requests, close Mongo, flush traces, exit.
 const shutdown = (signal) => {
     if (state.shuttingDown) return;
     state.shuttingDown = true;
-    logger.info({ signal }, "Shutting down");
+    logger.info({ signal, drainSeconds: config.drainSeconds }, "Shutting down: draining");
     const force = setTimeout(() => {
         logger.error("Forced exit after grace period");
         process.exit(1);
-    }, config.shutdownGraceSeconds * 1000);
+    }, (config.drainSeconds + config.shutdownGraceSeconds) * 1000);
     force.unref();
-    server.close(async () => {
-        await mongoose.disconnect().catch(() => {});
-        await tracing.shutdown();
-        logger.info("Shutdown complete");
-        process.exit(0);
-    });
+    setTimeout(() => {
+        logger.info("Drain period over, closing server");
+        server.close(async () => {
+            await mongoose.disconnect().catch(() => {});
+            await tracing.shutdown();
+            logger.info("Shutdown complete");
+            process.exit(0);
+        });
+        server.closeIdleConnections();
+    }, config.drainSeconds * 1000);
 };
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));

@@ -1468,6 +1468,56 @@
    "panels": []
   },
   {
+   "type": "timeseries",
+   "title": "Ingress 5xx from access logs (Loki): catches short bursts",
+   "id": 28,
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 24,
+    "x": 0,
+    "y": 53
+   },
+   "description": "Counts every 5xx in Traefik's access log. A short burst of a status code that never occurred before is invisible to Prometheus rate()/increase() (the counter series is created mid-burst), but every request is in the access log.",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "sum by (DownstreamStatus) (count_over_time({namespace=\"platform\", app=\"traefik\"} | json | DownstreamStatus >= 500 [1m]))",
+     "legendFormat": "{{DownstreamStatus}}"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "red"
+     },
+     "custom": {
+      "drawStyle": "bars",
+      "fillOpacity": 80,
+      "lineWidth": 1
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   }
+  },
+  {
    "type": "logs",
    "title": "API errors and warnings",
    "id": 26,
@@ -1479,7 +1529,7 @@
     "h": 8,
     "w": 24,
     "x": 0,
-    "y": 53
+    "y": 61
    },
    "targets": [
     {
@@ -1511,7 +1561,7 @@
     "h": 12,
     "w": 24,
     "x": 0,
-    "y": 61
+    "y": 69
    },
    "targets": [
     {

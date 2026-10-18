@@ -150,3 +150,33 @@ experiments are scripts in `scripts/demos/`, so any of them can be re-run live.
   *while* the bad release is in progress and checks that its replacement
   starts with the old config and becomes Ready (evidence 05).
 
+## 10. Load test: liveness probe killed a busy pod (192 × 502)
+
+- **Symptom:** one autoscaling run reported `Failed requests: 192 (Non-2xx)`
+  out of 95k. Prometheus showed **no** 5xx at all for that window.
+- **Evidence:**
+  - Traefik access logs (Loki): exactly 192 × `502` on `/api/version`, all
+    within 4 seconds.
+  - Kubernetes events for one API pod: *"Liveness probe failed ... context
+    deadline exceeded"*, then *"Container api failed liveness probe, will be
+    restarted"*.
+  - The pod's own logs: `Shutting down` (SIGTERM), then `Forced exit after
+    grace period` 10s later. Memory was 85 MiB of 256 MiB, so not OOM.
+- **Root cause (three parts):**
+  1. The node was CPU-saturated (load test + monitoring on a laptop). The pod
+     answered `/healthz` slower than the 2s timeout three times, so
+     Kubernetes killed a **slow but healthy** process, which added load.
+  2. A *container restart* doesn't remove the pod from the Service (only
+     failing readiness does). Traefik kept sending requests over its
+     keep-alive connections, and the app closed its listener straight away:
+     502s.
+  3. Prometheus missed it. Traefik creates the `code="502"` counter series
+     the first time a 502 happens, and `rate()`/`increase()` can't see
+     increments before a series' first sample.
+- **Change:** liveness timeout 5s × 6 failures (~60s); on SIGTERM the app now
+  fails readiness but keeps serving for 12s with `Connection: close`, then
+  closes idle connections and drains; a dashboard panel counts ingress 5xx
+  from the access logs (Loki), which sees every request.
+- **Verification:** autoscaling re-run under the same load (evidence 08) and
+  test *"requests are still served while draining, with Connection: close"*.
+

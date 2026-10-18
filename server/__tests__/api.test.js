@@ -46,6 +46,13 @@ describe("health and ops endpoints", () => {
         state.shuttingDown = false;
     });
 
+    test("requests are still served while draining, with Connection: close", async () => {
+        state.shuttingDown = true;
+        const res = await request(app).get("/api/version").expect(200);
+        expect(res.headers.connection).toBe("close");
+        state.shuttingDown = false;
+    });
+
     test("version reports build info", async () => {
         const res = await request(app).get("/api/version").expect(200);
         expect(res.body).toHaveProperty("commit");

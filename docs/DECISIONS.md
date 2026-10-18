@@ -46,7 +46,7 @@ least-privilege users visible.
 | Probe | API | Reason |
 |---|---|---|
 | startup | `/healthz`, up to 60s | Liveness must not kill a slow boot |
-| liveness | `/healthz` (no DB check) | Restart only when *this process* is broken. If liveness checked Mongo, a DB outage would restart every API pod in a loop and make recovery slower (evidence 06: restarts stay 0) |
+| liveness | `/healthz` (no DB check), 5s timeout × 6 | Restart only when *this process* is broken. If liveness checked Mongo, a DB outage would restart every API pod in a loop and make recovery slower (evidence 06: restarts stay 0). Tolerant on purpose: a slow, CPU-starved pod must not be killed for being slow ([INVESTIGATIONS #10](INVESTIGATIONS.md#10-load-test-liveness-probe-killed-a-busy-pod-192--502)) |
 | readiness | `/readyz` = Mongo connected and not shutting down | A pod that cannot serve should not receive traffic |
 
 **Trade-off I accepted:** because readiness depends on Mongo, a DB outage removes
@@ -56,8 +56,11 @@ nicer errors, but traffic then keeps flowing to pods that can't do useful work.
 Every useful endpoint of a URL shortener needs the DB, so I chose readiness.
 
 **Graceful shutdown:** `preStop: sleep 5` lets endpoints and Traefik stop
-routing to the pod first. On SIGTERM the app fails readiness, finishes
-in-flight requests, closes Mongo and flushes traces (`server/index.js`).
+routing to the pod first. On SIGTERM the app fails readiness and **keeps
+serving for 12s** with `Connection: close` (a container restart, unlike a pod
+deletion, leaves the pod in the Service until readiness fails), then closes
+idle connections, finishes in-flight requests, closes Mongo and flushes
+traces (`server/index.js`).
 Evidence 05 and 07: 0 failed requests across rollouts and drains.
 
 ## 4. Resources and scaling

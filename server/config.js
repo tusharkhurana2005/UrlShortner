@@ -14,7 +14,10 @@ const config = {
         .map((o) => o.trim())
         .filter(Boolean),
     logLevel: env.LOG_LEVEL || "info",
-    // Seconds to keep serving in-flight requests after SIGTERM before exiting.
+    // After SIGTERM: keep serving (with readiness failing) for drainSeconds so
+    // the pod leaves the load balancer first, then allow shutdownGraceSeconds
+    // for in-flight requests before forcing exit.
+    drainSeconds: parseInt(env.DRAIN_SECONDS || "10", 10),
     shutdownGraceSeconds: parseInt(env.SHUTDOWN_GRACE_SECONDS || "10", 10),
     authRateLimitPerWindow: parseInt(env.AUTH_RATE_LIMIT || "20", 10),
     build: {

@@ -65,6 +65,13 @@ app.use(pinoHttp({
     },
 }));
 app.use(httpMetricsMiddleware);
+// While draining, ask clients (the ingress) to drop their keep-alive
+// connection after this response, so no new request lands on a pod that is
+// about to stop.
+app.use((req, res, next) => {
+    if (state.shuttingDown) res.setHeader("Connection", "close");
+    next();
+});
 app.use(helmet());
 app.use(express.json({ limit: "10kb" }));
 

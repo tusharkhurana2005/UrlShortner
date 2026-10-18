@@ -84,6 +84,10 @@ spec:
               value: {{ .Values.api.jwtExpiresIn | quote }}
             - name: AUTH_RATE_LIMIT
               value: {{ .Values.api.authRateLimit | quote }}
+            # Keep serving after SIGTERM until readiness (5s x 2) has taken the
+            # pod out of the Service; preStop 5 + drain 12 + close 10 < 30s grace.
+            - name: DRAIN_SECONDS
+              value: "12"
             - name: DEPLOY_ENV
               value: {{ .Release.Namespace | quote }}
             {{- if .Values.tracing.enabled }}
@@ -118,20 +122,23 @@ spec:
             periodSeconds: 2
             failureThreshold: 30
           # liveness: process is wedged -> restart. Does not depend on Mongo.
+          # Deliberately tolerant (~60s unresponsive): under CPU starvation a
+          # 2s/3-strike probe killed a slow but healthy pod, which only made
+          # the overload worse (docs/INVESTIGATIONS.md #10).
           livenessProbe:
             httpGet:
               path: /healthz
               port: http
             periodSeconds: 10
-            timeoutSeconds: 2
-            failureThreshold: 3
+            timeoutSeconds: 5
+            failureThreshold: 6
           # readiness: Mongo reachable and not draining -> receives traffic.
           readinessProbe:
             httpGet:
               path: /readyz
               port: http
             periodSeconds: 5
-            timeoutSeconds: 2
+            timeoutSeconds: 3
             failureThreshold: 2
           lifecycle:
             # Give endpoints/ingress time to stop routing here before the
