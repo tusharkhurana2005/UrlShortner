@@ -57,7 +57,7 @@ quality_gates() {
   echo; echo "## gitleaks (full git history)"; gitleaks git "${ROOT_DIR}" --redact --no-banner 2>&1 | tail -2
 }
 
-STEPS="${*:-01 02 03 04 05 06 07 08 09 10}"
+STEPS="${*:-01 02 03 04 05 06 07 08 09 10 11}"
 want() { [[ " ${STEPS} " == *" $1 "* ]]; }
 
 want 01 && run 01-deploy-and-smoke-test.txt "Build, deploy and end-to-end smoke test" deploy_and_smoke
@@ -73,4 +73,5 @@ want 07 && run 07-node-drain.txt "Node maintenance with PDBs and topology spread
 want 08 && run 08-autoscaling.txt "Horizontal Pod Autoscaler under load (scripts/demos/autoscale.sh)" "$S/demos/autoscale.sh"
 want 09 && run 09-backup-restore-drill.txt "Backup and restore drill (scripts/demos/backup-restore.sh)" "$S/demos/backup-restore.sh"
 want 10 && run 10-quality-gates.txt "Local run of the CI quality gates" quality_gates
+want 11 && run 11-container-restart-drain.txt "Container restart under traffic drains without errors (scripts/demos/container-restart.sh)" "$S/demos/container-restart.sh"
 log "Evidence written to docs/evidence/"
