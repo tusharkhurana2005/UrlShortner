@@ -1,0 +1,31 @@
+# Baseline defect reproduction: unchanged code at 12b426b911f0fcad54f184c44ed0040f42bc9d2b
+# Run: baseline server/ in node:24-alpine (npm ci from its own lockfile), mongo:8.0 sharing its network namespace.
+# generated 2026-10-18T00:18:13Z
+
+## 1. Shorten https://example.com once
+$ curl -X POST localhost:8000/url/create -d {"userId":"6710000000000000000000aa","Url":"https://example.com"}
+{"message":"Url Created Successfully","Url":{"userId":"6710000000000000000000aa","redirectUrl":"https://example.com","shortUrl":"100680a","TimeStamp":[1792282681503],"_id":"6ad41050ae524ada7fe44db3","__v":0}}
+HTTP 201
+
+## 2. Shorten the same URL again
+(no response: the client ran inside the API container, and the whole process
+exited while handling this request, see step 4)
+
+## 3. Is the server still alive?
+container state: exited, exit code: 1
+
+## 4. Server output (docker logs)
+Server is running on port 8000
+MongoDB connected
+{ userId: '6710000000000000000000aa', Url: 'https://example.com' }
+{ userId: '6710000000000000000000aa', Url: 'https://example.com' }
+/app/controllers/UrlController.js:17
+        shortUrl = crypto.createHash("sha256").update(Url).digest("hex").slice(0, 7);
+                 ^
+TypeError: Assignment to constant variable.
+    at createShortUrl (/app/controllers/UrlController.js:17:18)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+Node.js v24.22.0
+
+## Same request against the final version: 15 integration tests include
+## 'the same URL can be shortened twice (baseline crashed here)', see server/__tests__/api.test.js
