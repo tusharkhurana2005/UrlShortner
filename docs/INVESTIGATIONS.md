@@ -128,3 +128,25 @@ experiments are scripts in `scripts/demos/`, so any of them can be re-run live.
   production cluster would run metrics-server with 2 replicas and a PDB.
 - **Verification:** HPA reported 23%/70% and scaled normally afterwards
   (evidence 08: 2→5→2).
+
+## 9. A bad release could break the old pods too
+
+- **Symptom:** the crash log recovered from Loki during the bad-release demo
+  showed `level:verbose` crashes in pods of the **old, good** ReplicaSet as
+  well as the new one. After the rollback, pods of the "bad" ReplicaSet were
+  Ready.
+- **Hypothesis:** both ReplicaSets read the same ConfigMap. Helm updates it in
+  place at the start of the release, so the old pods are only safe until they
+  restart.
+- **Evidence:** at the start of the next drill the good ReplicaSet had a pod
+  with 4 restarts. The old pods' env came from `envFrom: configMapRef` with a
+  single name, shared by every revision. Restoring the ConfigMap in the
+  rollback also "healed" the bad ReplicaSet's pods, which only differed by
+  their checksum annotation.
+- **Change:** the API's settings are now plain `env` in the pod template; the
+  ConfigMap is gone. Config is versioned with the ReplicaSet, and a rollback
+  restores code and config atomically.
+- **Verification:** `scripts/demos/bad-release.sh` now deletes an old pod
+  *while* the bad release is in progress and checks that its replacement
+  starts with the old config and becomes Ready (evidence 05).
+

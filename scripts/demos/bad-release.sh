@@ -9,11 +9,31 @@ GOOD="$(helm get values "${RELEASE}" -n "${NAMESPACE}" -o json | python3 -c 'imp
 echo "## Before: version ${GOOD} serving"; curl -s "${APP_URL}/api/version"; echo
 "$D/traffic.sh" start "$LOG"
 
+# The ReplicaSet currently serving (its pods carry this pod-template-hash).
+GOOD_HASH="$(kubectl -n "${NAMESPACE}" get pods -l app.kubernetes.io/component=api \
+  -o jsonpath='{.items[0].metadata.labels.pod-template-hash}')"
+
 echo; echo "## Release ${GOOD} again with a bad setting (LOG_LEVEL=verbose is not a valid pino level, the process exits at startup)"
+OUT="$(mktemp)"
+EXTRA_HELM_ARGS="--set api.logLevel=verbose" TIMEOUT=75s "$D/../deploy.sh" "${GOOD}" > "$OUT" 2>&1 &
+DPID=$!
+
+# Mid-rollout, an old pod restarts (eviction, OOM, node loss...). Its
+# replacement must start with the OLD config, not the bad release's config.
+sleep 25
+VICTIM="$(kubectl -n "${NAMESPACE}" get pods -l "app.kubernetes.io/component=api,pod-template-hash=${GOOD_HASH}" -o jsonpath='{.items[0].metadata.name}')"
+echo; echo "## While the bad release is rolling out: delete old pod ${VICTIM}"
+kubectl -n "${NAMESPACE}" delete pod "${VICTIM}" --wait=false
+sleep 3
+kubectl -n "${NAMESPACE}" wait --for=condition=Ready pod -l "app.kubernetes.io/component=api,pod-template-hash=${GOOD_HASH}" --timeout=90s >/dev/null
+echo "  pods of the serving ReplicaSet (${GOOD_HASH}) during the bad release:"
+kubectl -n "${NAMESPACE}" get pods -l "app.kubernetes.io/component=api" \
+  -o custom-columns='POD:.metadata.name,RS-HASH:.metadata.labels.pod-template-hash,READY:.status.containerStatuses[0].ready,RESTARTS:.status.containerStatuses[0].restartCount,LOG_LEVEL:.spec.containers[0].env[2].value' | sed 's/^/    /'
+
 set +e
-EXTRA_HELM_ARGS="--set api.logLevel=verbose" TIMEOUT=75s "$D/../deploy.sh" "${GOOD}" 2>&1 | grep -E "Error|rollback|failed|Deploying" 
-rc=${PIPESTATUS[0]}
+wait "$DPID"; rc=$?
 set -e
+grep -E "Error|rollback|failed|Deploying" "$OUT"
 echo "deploy.sh exit code: ${rc} (non-zero = release rejected)"
 
 echo; echo "## What Kubernetes saw: new pods crashed, old pods never stopped serving"

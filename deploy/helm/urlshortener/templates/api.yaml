@@ -38,9 +38,6 @@ spec:
       labels:
         {{- include "urlshortener.selectorLabels" $sel | nindent 8 }}
         app.kubernetes.io/version: {{ include "urlshortener.version" . | quote }}
-      annotations:
-        # Changing the ConfigMap changes this hash, which rolls the pods.
-        checksum/config: {{ include (print $.Template.BasePath "/api-configmap.yaml") . | sha256sum | trunc 16 }}
     spec:
       serviceAccountName: {{ $fullname }}-api
       automountServiceAccountToken: false
@@ -70,10 +67,31 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.api.port }}
-          envFrom:
-            - configMapRef:
-                name: {{ $fullname }}-api
+          # Configuration lives in the pod template, not in a shared ConfigMap:
+          # every ReplicaSet carries the config it was released with, so a bad
+          # release cannot change the config of the old pods still serving,
+          # and a rollback restores code and config together.
           env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: {{ .Values.api.port | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.api.logLevel | quote }}
+            - name: CORS_ORIGINS
+              value: {{ .Values.api.corsOrigins | quote }}
+            - name: JWT_EXPIRES_IN
+              value: {{ .Values.api.jwtExpiresIn | quote }}
+            - name: AUTH_RATE_LIMIT
+              value: {{ .Values.api.authRateLimit | quote }}
+            - name: DEPLOY_ENV
+              value: {{ .Release.Namespace | quote }}
+            {{- if .Values.tracing.enabled }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.tracing.otlpEndpoint | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: urlshortener-api
+            {{- end }}
             - name: MONGO_USER
               valueFrom:
                 secretKeyRef:

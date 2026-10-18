@@ -94,8 +94,17 @@ Kustomize patches would duplicate more and has no release or rollback concept.
 deploys the same chart with `ci.yaml`. The platform charts are pinned to exact
 versions in `scripts/platform-up.sh` with values in `deploy/platform/`.
 
-**Config vs secrets:** non-secret settings go in a ConfigMap. Its checksum is a
-pod annotation, so changing config rolls the pods. Secrets are separate, below.
+**Config is versioned with the release:** non-secret settings are environment
+variables in the Deployment's pod template, not a shared ConfigMap. Each
+ReplicaSet therefore carries the exact config it was released with. I started
+with a ConfigMap (with a checksum annotation to roll pods), and a failure
+experiment showed why that's wrong: a bad release overwrites the shared
+ConfigMap in place, and any *old* pod that restarts mid-rollout picks up the
+bad config and crashes too ([INVESTIGATIONS #9](INVESTIGATIONS.md#9-a-bad-release-could-break-the-old-pods-too)).
+For larger config files, the same guarantee comes from immutable ConfigMaps
+with a content hash in the name (like Kustomize's `configMapGenerator`).
+Secrets are shared objects with the same property, so rotating them means
+creating a new Secret name and rolling the pods to it (below).
 
 ## 6. CI/CD and the automation boundary
 
